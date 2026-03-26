@@ -1,0 +1,27 @@
+{
+  "name": "runtime-storyboard-debugger",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Turn software behavior into a navigable causal story for debugging and codebase comprehension",
+  "workspaces": [
+    "packages/core",
+    "packages/ui",
+    "examples/order-api"
+  ],
+  "scripts": {
+    "build": "npm run build:core && npm run build:ui",
+    "build:core": "npm run build -w packages/core",
+    "build:ui": "npm run build -w packages/ui",
+    "dev": "npm run dev -w packages/core",
+    "dev:ui": "npm run dev -w packages/ui",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@babel/preset-typescript": "^7.28.5",
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0"
+  }
+}
