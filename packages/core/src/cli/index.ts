@@ -2,10 +2,26 @@
 
 import { Command } from 'commander';
 import * as path from 'path';
-import { startServer } from '../server';
+import { ServerStartupError, startServer } from '../server';
 import { discoverEntryPoints } from '../analyzer/entry-points';
 
 const program = new Command();
+
+function parsePortOption(rawPort: string): number {
+  const port = Number.parseInt(rawPort, 10);
+
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid port: ${rawPort}. Expected an integer between 1 and 65535.`);
+  }
+
+  return port;
+}
+
+function reportCommandError(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`\nError: ${message}\n`);
+  process.exitCode = 1;
+}
 
 program
   .name('rsd')
@@ -19,24 +35,28 @@ program
   .option('-p, --port <port>', 'Server port', '3001')
   .option('--ui <path>', 'Path to built UI directory')
   .action(async (target: string, opts: { port: string; ui?: string }) => {
-    const targetDir = path.resolve(target);
-    const port = parseInt(opts.port, 10);
+    try {
+      const targetDir = path.resolve(target);
+      const port = parsePortOption(opts.port);
 
-    console.log(`\nAnalyzing: ${targetDir}\n`);
+      console.log(`\nAnalyzing: ${targetDir}\n`);
 
-    const entryPoints = await discoverEntryPoints(targetDir);
-    console.log(`Found ${entryPoints.length} entry point(s):\n`);
-    for (const ep of entryPoints) {
-      console.log(`  [${ep.type}] ${ep.name}`);
-      console.log(`    File: ${ep.file}:${ep.line}`);
-      console.log(`    ${ep.description}\n`);
+      const entryPoints = await discoverEntryPoints(targetDir);
+      console.log(`Found ${entryPoints.length} entry point(s):\n`);
+      for (const ep of entryPoints) {
+        console.log(`  [${ep.type}] ${ep.name}`);
+        console.log(`    File: ${ep.file}:${ep.line}`);
+        console.log(`    ${ep.description}\n`);
+      }
+
+      const uiDistPath = opts.ui
+        ? path.resolve(opts.ui)
+        : path.resolve(__dirname, '../../ui/dist');
+
+      await startServer({ targetDir, port, uiDistPath });
+    } catch (error) {
+      reportCommandError(error);
     }
-
-    const uiDistPath = opts.ui
-      ? path.resolve(opts.ui)
-      : path.resolve(__dirname, '../../ui/dist');
-
-    await startServer({ targetDir, port, uiDistPath });
   });
 
 program
@@ -47,20 +67,20 @@ program
   .option('-p, --port <port>', 'Server port', '3001')
   .option('--ui <path>', 'Path to built UI directory')
   .action(async (target: string, opts: { scenario: string; port: string; ui?: string }) => {
-    const targetDir = path.resolve(target);
-    const port = parseInt(opts.port, 10);
-
-    console.log(`\nTarget: ${targetDir}`);
-    console.log(`Scenario: ${opts.scenario}\n`);
-
-    const uiDistPath = opts.ui
-      ? path.resolve(opts.ui)
-      : path.resolve(__dirname, '../../ui/dist');
-
-    await startServer({ targetDir, port, uiDistPath });
-
-    // Auto-run the scenario via the API
     try {
+      const targetDir = path.resolve(target);
+      const port = parsePortOption(opts.port);
+
+      console.log(`\nTarget: ${targetDir}`);
+      console.log(`Scenario: ${opts.scenario}\n`);
+
+      const uiDistPath = opts.ui
+        ? path.resolve(opts.ui)
+        : path.resolve(__dirname, '../../ui/dist');
+
+      await startServer({ targetDir, port, uiDistPath });
+
+      // Auto-run the scenario via the API
       const response = await fetch(`http://localhost:${port}/api/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -74,6 +94,11 @@ program
         console.error('Failed to generate storyboard:', data.error);
       }
     } catch (err) {
+      if (err instanceof ServerStartupError) {
+        reportCommandError(err);
+        return;
+      }
+
       console.error('\nNote: Could not auto-run scenario. Use the UI to run scenarios manually.\n');
     }
   });

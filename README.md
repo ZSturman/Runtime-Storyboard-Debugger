@@ -56,6 +56,9 @@ npm test
 # Discover entry points and start the API server
 npx ts-node packages/core/src/cli/index.ts analyze examples/order-api
 
+# If port 3001 is already in use
+npx ts-node packages/core/src/cli/index.ts analyze examples/order-api --port 3002
+
 # Run a specific scenario
 npx ts-node packages/core/src/cli/index.ts run examples/order-api --scenario examples/order-api/scenarios/straight-through.ts
 ```
@@ -68,6 +71,9 @@ npx ts-node packages/core/src/cli/index.ts analyze examples/order-api
 
 # Terminal 2: Start the React dev server
 cd packages/ui && npx vite
+
+# If the API is running on a different port
+cd packages/ui && RSD_API_URL=http://localhost:3002 npx vite
 ```
 
 Open http://localhost:3000 to explore storyboards.

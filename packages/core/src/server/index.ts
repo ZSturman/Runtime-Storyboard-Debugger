@@ -16,6 +16,18 @@ export interface ServerConfig {
   uiDistPath?: string;
 }
 
+export class ServerStartupError extends Error {
+  code?: string;
+  port: number;
+
+  constructor(message: string, port: number, code?: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'ServerStartupError';
+    this.code = code;
+    this.port = port;
+  }
+}
+
 export function createServer(config: ServerConfig) {
   const app = express();
   app.use(cors());
@@ -303,9 +315,21 @@ function createSafeRequire(scenarioPath: string, targetDir: string) {
 }
 
 export function startServer(config: ServerConfig): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const app = createServer(config);
-    app.listen(config.port, () => {
+    const server = app.listen(config.port);
+
+    const handleError = (err: NodeJS.ErrnoException) => {
+      const message = err.code === 'EADDRINUSE'
+        ? `Port ${config.port} is already in use. Stop the process using it or rerun with --port <open-port>.`
+        : `Failed to start server on port ${config.port}: ${err.message}`;
+
+      reject(new ServerStartupError(message, config.port, err.code, { cause: err }));
+    };
+
+    server.once('error', handleError);
+    server.once('listening', () => {
+      server.off('error', handleError);
       console.log(`\n  Runtime Storyboard Debugger`);
       console.log(`  ─────────────────────────────`);
       console.log(`  Target:  ${config.targetDir}`);
