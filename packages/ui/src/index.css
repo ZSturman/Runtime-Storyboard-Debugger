@@ -3,9 +3,24 @@
 @tailwind utilities;
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'Inter', 'Avenir Next', 'Segoe UI', 'Helvetica Neue', sans-serif;
   margin: 0;
   min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.14), transparent 32%),
+    radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.12), transparent 28%),
+    #0f1117;
+  color: #c9cdd8;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
 }
 
 /* Custom scrollbar */
@@ -32,3 +47,43 @@ body {
   background-color: rgba(59, 130, 246, 0.15);
   border-left: 3px solid #3b82f6;
 }
+
+/* Flow map connector lines */
+.flow-connector {
+  position: relative;
+}
+
+.flow-connector::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #2a2d3a;
+}
+
+.flow-node-active {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Phase transition helpers */
+.phase-enter {
+  animation: fade-in 0.35s ease-out both;
+}
+
+/* Stagger children animations */
+.stagger-children > * {
+  animation: fade-in 0.35s ease-out both;
+}
+
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 50ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 100ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 150ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 200ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 250ms; }
+.stagger-children > *:nth-child(7) { animation-delay: 300ms; }
+.stagger-children > *:nth-child(8) { animation-delay: 350ms; }
+.stagger-children > *:nth-child(9) { animation-delay: 400ms; }
+.stagger-children > *:nth-child(10) { animation-delay: 450ms; }

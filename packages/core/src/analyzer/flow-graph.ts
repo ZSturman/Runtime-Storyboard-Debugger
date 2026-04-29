@@ -19,6 +19,7 @@ function createNode(type: FlowNodeType, label: string, file: string, line: numbe
     file,
     line,
     children: [],
+    findings: [],
   };
 }
 
@@ -206,6 +207,7 @@ export function buildFlowGraph(filePath: string, functionName: string, targetDir
     entryPointId: '',
     nodes,
     rootNodeId: entryNode.id,
+    findings: [],
   };
 }
 
@@ -262,5 +264,6 @@ export function buildFlowGraphFromSource(code: string, functionName: string, fil
     entryPointId: '',
     nodes,
     rootNodeId: entryNode.id,
+    findings: [],
   };
 }

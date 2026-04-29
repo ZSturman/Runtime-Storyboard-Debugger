@@ -25,27 +25,37 @@ export default function rsdBabelPlugin(): PluginObj<PluginState> {
           if (state.rsdImportAdded) return;
           state.rsdImportAdded = true;
 
-          // Inject: const __rsd = require('@rsd/runtime') || global.__rsd;
-          const rsdDecl = t.variableDeclaration('const', [
-            t.variableDeclarator(
-              t.identifier('__rsd'),
-              t.logicalExpression(
-                '||',
-                t.callExpression(
-                  t.memberExpression(t.identifier('global'), t.identifier('__rsd_runtime')),
-                  []
+          const rsdDecl = t.functionDeclaration(
+            t.identifier('__rsd'),
+            [],
+            t.blockStatement([
+              t.returnStatement(
+                t.conditionalExpression(
+                  t.binaryExpression(
+                    '===',
+                    t.unaryExpression(
+                      'typeof',
+                      t.memberExpression(t.identifier('global'), t.identifier('__rsd_runtime')),
+                    ),
+                    t.stringLiteral('function'),
+                  ),
+                  t.callExpression(
+                    t.memberExpression(t.identifier('global'), t.identifier('__rsd_runtime')),
+                    [],
+                  ),
+                  t.objectExpression([
+                    createNoopMethod('enter'),
+                    createNoopMethod('exit'),
+                    createNoopMethod('branch'),
+                    createNoopMethod('awaitStart'),
+                    createNoopMethod('awaitEnd'),
+                    createNoopMethod('sideEffect'),
+                  ]),
                 ),
-                t.objectExpression([
-                  createNoopMethod('enter'),
-                  createNoopMethod('exit'),
-                  createNoopMethod('branch'),
-                  createNoopMethod('awaitStart'),
-                  createNoopMethod('awaitEnd'),
-                  createNoopMethod('sideEffect'),
-                ]),
               ),
-            ),
-          ]);
+            ]),
+          );
+          (rsdDecl as any)._rsdInstrumented = true;
 
           path.unshiftContainer('body', rsdDecl);
         },
@@ -82,6 +92,16 @@ function createNoopMethod(name: string): t.ObjectProperty {
   const arrow = t.arrowFunctionExpression([], t.identifier('undefined'));
   (arrow as any)._rsdInstrumented = true;
   return t.objectProperty(t.identifier(name), arrow);
+}
+
+function buildRuntimeMethodCall(methodName: string, args: t.Expression[]): t.CallExpression {
+  return t.callExpression(
+    t.memberExpression(
+      t.callExpression(t.identifier('__rsd'), []),
+      t.identifier(methodName),
+    ),
+    args,
+  );
 }
 
 function getFilename(state: PluginState): string {
@@ -121,6 +141,97 @@ function buildArgsObject(params: (t.Identifier | t.Pattern | t.RestElement | t.T
   return t.objectExpression(properties);
 }
 
+function buildSnapshotObject(nodes: Array<t.Node | null | undefined>): t.ObjectExpression {
+  const properties: t.ObjectProperty[] = [];
+  const seen = new Set<string>();
+
+  function pushProperty(key: string, value: t.Expression) {
+    if (seen.has(key)) return;
+    seen.add(key);
+    properties.push(t.objectProperty(t.stringLiteral(key), t.cloneNode(value)));
+  }
+
+  function collect(node: t.Node | null | undefined) {
+    if (!node) return;
+
+    if (t.isIdentifier(node)) {
+      pushProperty(node.name, node);
+      return;
+    }
+
+    if (t.isMemberExpression(node)) {
+      pushProperty(exprToString(node), node as t.Expression);
+      return;
+    }
+
+    if (t.isBinaryExpression(node) || t.isLogicalExpression(node)) {
+      collect(node.left);
+      collect(node.right);
+      return;
+    }
+
+    if (t.isUnaryExpression(node)) {
+      collect(node.argument);
+      return;
+    }
+
+    if (t.isCallExpression(node)) {
+      collect(node.callee);
+      for (const arg of node.arguments) {
+        if (t.isExpression(arg)) {
+          collect(arg);
+        }
+      }
+      return;
+    }
+
+    if (t.isArrayExpression(node)) {
+      for (const element of node.elements) {
+        if (element && t.isExpression(element)) {
+          collect(element);
+        }
+      }
+      return;
+    }
+
+    if (t.isObjectExpression(node)) {
+      for (const property of node.properties) {
+        if (t.isObjectProperty(property) && t.isExpression(property.value)) {
+          collect(property.value);
+        }
+      }
+      return;
+    }
+
+    if (t.isConditionalExpression(node)) {
+      collect(node.test);
+      collect(node.consequent);
+      collect(node.alternate);
+    }
+  }
+
+  for (const node of nodes) {
+    collect(node);
+  }
+
+  return t.objectExpression(properties);
+}
+
+function buildArgumentSnapshot(args: ReadonlyArray<t.Expression | t.SpreadElement | t.ArgumentPlaceholder>): t.ObjectExpression {
+  const properties: t.ObjectProperty[] = [];
+  args.forEach((arg, index) => {
+    if (t.isExpression(arg)) {
+      properties.push(
+        t.objectProperty(
+          t.stringLiteral(`arg${index + 1}`),
+          t.cloneNode(arg),
+        ),
+      );
+    }
+  });
+  return t.objectExpression(properties);
+}
+
 function instrumentFunction(
   path: NodePath<t.FunctionDeclaration | t.FunctionExpression>,
   state: PluginState
@@ -136,7 +247,7 @@ function instrumentFunction(
   const line = path.node.loc?.start.line ?? 0;
 
   const enterCall = t.expressionStatement(
-    t.callExpression(t.memberExpression(t.identifier('__rsd'), t.identifier('enter')), [
+    buildRuntimeMethodCall('enter', [
       t.stringLiteral(fnName),
       buildArgsObject(path.node.params),
       t.stringLiteral(file),
@@ -145,9 +256,10 @@ function instrumentFunction(
   );
 
   const exitCall = t.expressionStatement(
-    t.callExpression(t.memberExpression(t.identifier('__rsd'), t.identifier('exit')), [
+    buildRuntimeMethodCall('exit', [
       t.stringLiteral(fnName),
       t.identifier('undefined'),
+      buildSnapshotObject(path.node.params),
       t.stringLiteral(file),
       t.numericLiteral(line),
     ])
@@ -167,9 +279,10 @@ function instrumentFunction(
       retPath.replaceWithMultiple([
         t.variableDeclaration('const', [t.variableDeclarator(tempId, retVal)]),
         t.expressionStatement(
-          t.callExpression(t.memberExpression(t.identifier('__rsd'), t.identifier('exit')), [
+          buildRuntimeMethodCall('exit', [
             t.stringLiteral(fnName),
             t.cloneNode(tempId),
+            buildSnapshotObject([...path.node.params, retVal]),
             t.stringLiteral(file),
             t.numericLiteral(retPath.node.loc?.start.line ?? line),
           ])
@@ -200,7 +313,7 @@ function instrumentArrowFunction(
     const tempId = path.scope.generateUidIdentifier('retVal');
     path.node.body = t.blockStatement([
       t.expressionStatement(
-        t.callExpression(t.memberExpression(t.identifier('__rsd'), t.identifier('enter')), [
+        buildRuntimeMethodCall('enter', [
           t.stringLiteral(fnName),
           buildArgsObject(path.node.params),
           t.stringLiteral(file),
@@ -209,9 +322,10 @@ function instrumentArrowFunction(
       ),
       t.variableDeclaration('const', [t.variableDeclarator(tempId, expr)]),
       t.expressionStatement(
-        t.callExpression(t.memberExpression(t.identifier('__rsd'), t.identifier('exit')), [
+        buildRuntimeMethodCall('exit', [
           t.stringLiteral(fnName),
           t.cloneNode(tempId),
+          buildSnapshotObject([...path.node.params, expr]),
           t.stringLiteral(file),
           t.numericLiteral(line),
         ])
@@ -248,7 +362,7 @@ function instrumentBranch(path: NodePath<t.IfStatement>, state: PluginState) {
   ]);
 
   const branchCall = t.expressionStatement(
-    t.callExpression(t.memberExpression(t.identifier('__rsd'), t.identifier('branch')), [
+    buildRuntimeMethodCall('branch', [
       t.stringLiteral(condSource),
       t.cloneNode(tempId),
       condParts,
@@ -327,13 +441,13 @@ function instrumentAwait(path: NodePath<t.AwaitExpression>, state: PluginState) 
   // Simplified: keep original await, wrap with start/end
 
   const startCall = t.callExpression(
-    t.memberExpression(t.identifier('__rsd'), t.identifier('awaitStart')),
-    [t.stringLiteral(argSource), t.stringLiteral(file), t.numericLiteral(line)]
+    t.memberExpression(t.callExpression(t.identifier('__rsd'), []), t.identifier('awaitStart')),
+    [t.stringLiteral(argSource), buildSnapshotObject([path.node.argument]), t.stringLiteral(file), t.numericLiteral(line)]
   );
 
   const endCall = t.callExpression(
-    t.memberExpression(t.identifier('__rsd'), t.identifier('awaitEnd')),
-    [t.stringLiteral(argSource), t.stringLiteral(file), t.numericLiteral(line)]
+    t.memberExpression(t.callExpression(t.identifier('__rsd'), []), t.identifier('awaitEnd')),
+    [t.stringLiteral(argSource), buildSnapshotObject([path.node.argument]), t.stringLiteral(file), t.numericLiteral(line)]
   );
 
   // Wrap: (startCall, await expr) then endCall
@@ -403,12 +517,13 @@ function instrumentSideEffect(path: NodePath<t.CallExpression>, state: PluginSta
       const line = path.node.loc?.start.line ?? 0;
 
       const stmtParent = path.getStatementParent();
-      if (stmtParent) {
-        stmtParent.insertBefore(
+  if (stmtParent) {
+    stmtParent.insertBefore(
           t.expressionStatement(
-            t.callExpression(t.memberExpression(t.identifier('__rsd'), t.identifier('sideEffect')), [
+            buildRuntimeMethodCall('sideEffect', [
               t.stringLiteral(sideEffectMethods[methodName]),
               t.stringLiteral(`${calleeName || methodName}() called`),
+              buildArgumentSnapshot(path.node.arguments),
               t.stringLiteral(file),
               t.numericLiteral(line),
             ])
@@ -427,13 +542,14 @@ function instrumentSideEffect(path: NodePath<t.CallExpression>, state: PluginSta
   if (stmtParent) {
     stmtParent.insertBefore(
       t.expressionStatement(
-        t.callExpression(t.memberExpression(t.identifier('__rsd'), t.identifier('sideEffect')), [
-          t.stringLiteral(pattern.type),
-          t.stringLiteral(pattern.descFn(calleeName)),
-          t.stringLiteral(file),
-          t.numericLiteral(line),
-        ])
-      )
+          buildRuntimeMethodCall('sideEffect', [
+            t.stringLiteral(pattern.type),
+            t.stringLiteral(pattern.descFn(calleeName)),
+            buildArgumentSnapshot(path.node.arguments),
+            t.stringLiteral(file),
+            t.numericLiteral(line),
+          ])
+        )
     );
   }
 }

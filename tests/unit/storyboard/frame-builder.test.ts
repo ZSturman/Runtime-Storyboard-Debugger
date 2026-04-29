@@ -61,6 +61,7 @@ describe('Frame Builder', () => {
     expect(branchFrame!.branch!.conditionSource).toBe('total > 100');
     expect(branchFrame!.branch!.taken).toBe(true);
     expect(branchFrame!.branch!.conditionValues).toEqual({ total: 150 });
+    expect(branchFrame!.branch!.options).toHaveLength(2);
   });
 
   it('creates side-effect frames', () => {
@@ -93,6 +94,41 @@ describe('Frame Builder', () => {
     expect(errFrame!.errorMessage).toBe('something went wrong');
   });
 
+  it('creates snapshot frames from state-snapshot events', () => {
+    const events: TraceEvent[] = [
+      makeEvent({ type: 'function-enter', functionName: 'inspect' }),
+      makeEvent({ type: 'state-snapshot', snapshotLabel: 'Branch values', snapshotValues: { total: 150 } }),
+    ];
+
+    const frames = buildFrames(events);
+    const snapshotFrame = frames.find((frame) => frame.type === 'state-snapshot');
+    expect(snapshotFrame).toBeDefined();
+    expect(snapshotFrame!.state).toEqual({ total: 150 });
+    expect(snapshotFrame!.snapshotLabel).toBe('Branch values');
+  });
+
+  it('creates log frames from stdout events', () => {
+    const events: TraceEvent[] = [
+      makeEvent({ type: 'stdout', message: 'processing order' }),
+    ];
+
+    const frames = buildFrames(events);
+    const logFrame = frames.find((frame) => frame.type === 'log');
+    expect(logFrame).toBeDefined();
+    expect(logFrame!.state.message).toBe('processing order');
+  });
+
+  it('creates status frames from status events', () => {
+    const events: TraceEvent[] = [
+      makeEvent({ type: 'status', statusLabel: 'Preparing runtime' }),
+    ];
+
+    const frames = buildFrames(events);
+    const statusFrame = frames.find((frame) => frame.type === 'status');
+    expect(statusFrame).toBeDefined();
+    expect(statusFrame!.statusLabel).toBe('Preparing runtime');
+  });
+
   it('creates async boundary and handoff frames', () => {
     const events: TraceEvent[] = [
       makeEvent({ type: 'function-enter', functionName: 'fetchData' }),
@@ -120,6 +156,18 @@ describe('Frame Builder', () => {
 
     const frames = buildFrames(events);
     expect(frames[0].nextFrameId).toBe(frames[1].id);
+  });
+
+  it('links frames with previousFrameId', () => {
+    const events: TraceEvent[] = [
+      makeEvent({ type: 'function-enter', functionName: 'a' }),
+      makeEvent({ type: 'function-enter', functionName: 'b' }),
+      makeEvent({ type: 'function-exit', functionName: 'b' }),
+    ];
+
+    const frames = buildFrames(events);
+    expect(frames[0].previousFrameId).toBeUndefined();
+    expect(frames[1].previousFrameId).toBe(frames[0].id);
   });
 
   it('assigns sequential sequence numbers', () => {

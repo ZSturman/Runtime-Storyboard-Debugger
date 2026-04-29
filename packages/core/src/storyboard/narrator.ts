@@ -8,6 +8,11 @@ export function narrate(frame: StoryboardFrame): StoryboardFrame {
   const result = { ...frame };
 
   switch (frame.type) {
+    case 'status':
+      result.title = frame.statusLabel || 'Execution status';
+      result.description = frame.statusLabel || 'Execution status update.';
+      break;
+
     case 'function-entry':
       result.title = `Entering ${frame.functionName}`;
       result.description = buildEntryDescription(frame);
@@ -36,6 +41,16 @@ export function narrate(frame: StoryboardFrame): StoryboardFrame {
     case 'side-effect':
       result.title = buildSideEffectTitle(frame);
       result.description = buildSideEffectDescription(frame);
+      break;
+
+    case 'state-snapshot':
+      result.title = frame.snapshotLabel || 'State snapshot';
+      result.description = buildSnapshotDescription(frame);
+      break;
+
+    case 'log':
+      result.title = frame.statusLabel === 'stderr' ? 'Runtime warning' : 'Runtime output';
+      result.description = frame.state.message ? String(frame.state.message) : 'Console output captured during execution.';
       break;
 
     case 'error':
@@ -138,6 +153,18 @@ function buildSideEffectDescription(frame: StoryboardFrame): string {
   if (frame.sideEffects.length === 1) return frame.sideEffects[0].description;
 
   return `Multiple side effects occurred:\n${frame.sideEffects.map((se, i) => `${i + 1}. ${se.description}`).join('\n')}`;
+}
+
+function buildSnapshotDescription(frame: StoryboardFrame): string {
+  const entries = Object.entries(frame.state || {});
+  if (entries.length === 0) {
+    return 'Captured a point-in-time snapshot, but no serializable values were available.';
+  }
+
+  return `Captured ${entries.length} value${entries.length === 1 ? '' : 's'} at this point in execution: ${entries
+    .slice(0, 4)
+    .map(([key, value]) => `${key} = ${formatValue(value)}`)
+    .join(', ')}.`;
 }
 
 function formatValue(value: unknown): string {

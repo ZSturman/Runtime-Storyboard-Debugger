@@ -17,6 +17,8 @@ describe('Entry Point Discovery', () => {
     expect(routes[0].name).toBe('GET /users');
     expect(routes[0].httpMethod).toBe('GET');
     expect(routes[0].httpPath).toBe('/users');
+    expect(routes[0].runSupport.status).toBe('supported');
+    expect(routes[0].routeRequestShape?.fields.some((field) => field.key === 'query')).toBe(true);
     expect(routes[1].name).toBe('POST /orders');
     expect(routes[1].httpMethod).toBe('POST');
   });
@@ -33,6 +35,8 @@ describe('Entry Point Discovery', () => {
     expect(exported).toHaveLength(2);
     expect(exported[0].name).toBe('processOrder');
     expect(exported[1].name).toBe('calculateTotal');
+    expect(exported[0].invocationKind).toBe('function');
+    expect(exported[0].inputFields[0].location).toBe('argument');
   });
 
   it('discovers default exported functions', () => {
@@ -50,7 +54,9 @@ describe('Entry Point Discovery', () => {
     `;
 
     const entryPoints = discoverEntryPointsFromSource(code, 'main.ts');
-    expect(entryPoints.some((ep) => ep.type === 'main-function')).toBe(true);
+    const main = entryPoints.find((ep) => ep.type === 'main-function');
+    expect(main).toBeDefined();
+    expect(main!.runSupport.status).toBe('preview-only');
   });
 
   it('extracts function parameters', () => {

@@ -1,113 +1,434 @@
-import { useState } from 'react';
-import { useApi } from './hooks/useApi';
-import { fetchEntryPoints, fetchScenarios, runScenario } from './api';
-import type { Storyboard, StoryboardFrame } from './api';
-import { Layout } from './components/Layout';
-import { EntryPointPanel } from './components/EntryPointPanel';
-import { StoryboardTimeline } from './components/StoryboardTimeline';
-import { FrameDetail } from './components/FrameDetail';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createWorkspace,
+  fetchWorkspaces,
+  startExecutionSession,
+  subscribeToExecution,
+  subscribeToWorkspace,
+  type EntryPointInputField,
+  type ExecutionSession,
+  type StoryboardFrame,
+  type WorkspaceSession,
+} from './api';
+import { PhaseContainer } from './components/PhaseContainer';
+import { ConfigureScreen } from './components/ConfigureScreen';
+import { WorkspaceIntakeScreen } from './components/WorkspaceIntakeScreen';
+import { WorkspaceLoadingScreen } from './components/WorkspaceLoadingScreen';
+import { WorkspaceOverviewScreen } from './components/WorkspaceOverviewScreen';
+import { LiveExecutionScreen } from './components/LiveExecutionScreen';
+
+type Phase = 'intake' | 'loading' | 'overview' | 'configure' | 'execute';
+type SourceType = 'local-path' | 'github-url';
 
 export default function App() {
-  const entryPoints = useApi(fetchEntryPoints);
-  const scenarios = useApi(fetchScenarios);
-  const [storyboard, setStoryboard] = useState<Storyboard | null>(null);
-  const [selectedFrame, setSelectedFrame] = useState<StoryboardFrame | null>(null);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<Phase>('intake');
+  const [technicalDetails, setTechnicalDetails] = useState(false);
+  const [sourceType, setSourceType] = useState<SourceType>('local-path');
+  const [sourceValue, setSourceValue] = useState('');
+  const [workspace, setWorkspace] = useState<WorkspaceSession | null>(null);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [selectedEntryPointId, setSelectedEntryPointId] = useState<string | null>(null);
+  const [draftInputs, setDraftInputs] = useState<Record<string, string | boolean>>({});
+  const [flagsText, setFlagsText] = useState('{}');
+  const [execution, setExecution] = useState<ExecutionSession | null>(null);
+  const [currentFrameIndex, setCurrentFrameIndex] = useState(0);
+  const [executionError, setExecutionError] = useState<string | null>(null);
+  const [rerunContext, setRerunContext] = useState<{ storyboardId?: string; frameId?: string; label: string } | null>(null);
+  const workspaceUnsubscribeRef = useRef<(() => void) | null>(null);
+  const executionUnsubscribeRef = useRef<(() => void) | null>(null);
 
-  async function handleRunScenario(scenarioPath: string) {
-    setRunning(true);
-    setError(null);
-    setSelectedFrame(null);
+  const entryPoints = workspace?.entryPoints || [];
+  const selectedEntryPoint = useMemo(
+    () => entryPoints.find((entryPoint) => entryPoint.id === selectedEntryPointId) || null,
+    [entryPoints, selectedEntryPointId],
+  );
+  const activeFlowGraph = selectedEntryPoint ? workspace?.flowGraphs?.[selectedEntryPoint.id] || null : null;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchWorkspaces()
+      .then((workspaces) => {
+        if (cancelled || workspaces.length === 0) return;
+        const next = [...workspaces].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+        setWorkspace(next);
+        if (next.status === 'ready') {
+          setPhase('overview');
+        } else if (next.status === 'running') {
+          setPhase('loading');
+        }
+      })
+      .catch(() => {
+        // best-effort initial bootstrap
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    workspaceUnsubscribeRef.current?.();
+    if (!workspace) return;
+
+    workspaceUnsubscribeRef.current = subscribeToWorkspace(workspace.id, {
+      onEvent: (event) => {
+        if (event.workspace) {
+          setWorkspace(event.workspace);
+          if (event.workspace.status === 'ready') {
+            setPhase((current) => current === 'loading' ? 'overview' : current);
+          }
+          if (event.workspace.status === 'failed') {
+            setWorkspaceError(event.workspace.errors.at(-1) || 'Workspace analysis failed.');
+            setPhase('loading');
+          }
+        }
+        if (event.type === 'error') {
+          setWorkspaceError(event.message || 'Workspace analysis failed.');
+        }
+      },
+    });
+
+    return () => {
+      workspaceUnsubscribeRef.current?.();
+      workspaceUnsubscribeRef.current = null;
+    };
+  }, [workspace?.id]);
+
+  useEffect(() => {
+    if (selectedEntryPoint) {
+      setDraftInputs(createDraftInputs(selectedEntryPoint.inputFields));
+      setFlagsText('{}');
+    }
+  }, [selectedEntryPoint?.id]);
+
+  useEffect(() => {
+    if (!workspace || !selectedEntryPointId) return;
+    if (!workspace.entryPoints.some((entryPoint) => entryPoint.id === selectedEntryPointId)) {
+      setSelectedEntryPointId(null);
+      setPhase('overview');
+    }
+  }, [workspace?.updatedAt, selectedEntryPointId]);
+
+  useEffect(() => {
+    return () => {
+      workspaceUnsubscribeRef.current?.();
+      executionUnsubscribeRef.current?.();
+    };
+  }, []);
+
+  async function handleCreateWorkspace() {
+    if (!sourceValue.trim()) {
+      setWorkspaceError(
+        sourceType === 'local-path'
+          ? 'Enter a local directory path.'
+          : 'Enter a GitHub repository URL such as https://github.com/owner/repo or https://github.com/owner/repo/tree/main.',
+      );
+      return;
+    }
+
+    setWorkspaceError(null);
+    setExecution(null);
+    setExecutionError(null);
+    setSelectedEntryPointId(null);
+    setPhase('loading');
+
     try {
-      const sb = await runScenario(scenarioPath);
-      setStoryboard(sb);
-      if (sb.frames.length > 0) {
-        setSelectedFrame(sb.frames[0]);
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message);
-    } finally {
-      setRunning(false);
+      const nextWorkspace = await createWorkspace(
+        sourceType === 'local-path'
+          ? { type: 'local-path', path: sourceValue.trim() }
+          : { type: 'github-url', url: sourceValue.trim() },
+      );
+
+      setWorkspace(nextWorkspace);
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : String(error));
+      setPhase('intake');
     }
   }
 
-  function handleSelectFrame(frame: StoryboardFrame) {
-    setSelectedFrame(frame);
+  function handleOpenWorkspace(entryPointId: string) {
+    setSelectedEntryPointId(entryPointId);
+    setExecution(null);
+    setExecutionError(null);
+    setPhase('configure');
   }
 
-  function handleNavigateToFrame(frameId: string) {
-    if (!storyboard) return;
-    const frame = storyboard.frames.find((f) => f.id === frameId);
-    if (frame) setSelectedFrame(frame);
+  async function handleRunSelected() {
+    if (!workspace || !selectedEntryPoint) return;
+
+    setExecutionError(null);
+
+    try {
+      const inputs = materializeInputs(selectedEntryPoint.inputFields, draftInputs);
+      const flags = parseJsonObject(flagsText, 'Flags');
+      const nextExecution = await startExecutionSession(
+        workspace.id,
+        selectedEntryPoint.id,
+        inputs,
+        flags,
+        rerunContext ? { storyboardId: rerunContext.storyboardId, frameId: rerunContext.frameId } : undefined,
+      );
+
+      setExecution(nextExecution);
+      setCurrentFrameIndex(0);
+      setRerunContext(null);
+      setPhase('execute');
+      subscribeExecutionSession(workspace.id, nextExecution.id);
+    } catch (error) {
+      setExecutionError(error instanceof Error ? error.message : String(error));
+    }
   }
 
-  const sidebar = (
-    <EntryPointPanel
-      entryPoints={entryPoints.data || []}
-      scenarios={scenarios.data || []}
-      loading={entryPoints.loading || scenarios.loading}
-      onRunScenario={handleRunScenario}
-      running={running}
-    />
-  );
+  function subscribeExecutionSession(workspaceId: string, executionId: string) {
+    executionUnsubscribeRef.current?.();
+    executionUnsubscribeRef.current = subscribeToExecution(workspaceId, executionId, {
+      onEvent: (event) => {
+        setExecution((current) => {
+          if (!current || current.id !== executionId) return current;
 
-  const main = (
-    <>
-      {error && (
-        <div className="m-4 p-3 bg-rsd-error/10 border border-rsd-error/30 rounded-lg text-rsd-error text-sm">
-          {error}
-        </div>
-      )}
-      {storyboard ? (
-        <StoryboardTimeline
-          storyboard={storyboard}
-          selectedFrameId={selectedFrame?.id || null}
-          onSelectFrame={handleSelectFrame}
-        />
-      ) : (
-        <EmptyState running={running} />
-      )}
-    </>
-  );
+          if (event.type === 'status') {
+            return { ...current, status: event.status || current.status };
+          }
 
-  const detail = selectedFrame ? (
-    <FrameDetail
-      frame={selectedFrame}
-      onNavigateToFrame={handleNavigateToFrame}
-    />
-  ) : null;
+          if (event.type === 'trace-event' && event.traceEvent) {
+            return {
+              ...current,
+              events: [...current.events, event.traceEvent],
+            };
+          }
 
-  return <Layout sidebar={sidebar} main={main} detail={detail} />;
-}
+          if (event.type === 'frames' && event.frames) {
+            setCurrentFrameIndex((index) => {
+              const wasAtEnd = index >= Math.max(0, current.frames.length - 1);
+              return wasAtEnd ? Math.max(0, event.frames!.length - 1) : Math.min(index, Math.max(0, event.frames!.length - 1));
+            });
+            return {
+              ...current,
+              status: event.status || current.status,
+              frames: event.frames,
+              currentStepId: event.frames[event.frames.length - 1]?.id,
+            };
+          }
 
-function EmptyState({ running }: { running: boolean }) {
-  if (running) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center">
-          <div className="w-8 h-8 border-2 border-rsd-accent border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-rsd-muted">Running scenario...</p>
-        </div>
-      </div>
-    );
+          if (event.type === 'storyboard' && event.storyboard) {
+            setCurrentFrameIndex(Math.max(0, event.storyboard.frames.length - 1));
+            return {
+              ...current,
+              status: 'completed',
+              storyboard: event.storyboard,
+              storyboardId: event.storyboard.id,
+              frames: event.storyboard.frames,
+              fallback: event.storyboard.fallback || current.fallback,
+              currentStepId: event.storyboard.frames[event.storyboard.frames.length - 1]?.id,
+            };
+          }
+
+          if (event.type === 'fallback') {
+            return {
+              ...current,
+              status: 'fallback-ready',
+              fallback: event.fallback || current.fallback,
+            };
+          }
+
+          if (event.type === 'error') {
+            setExecutionError(event.error || 'Execution failed.');
+            return {
+              ...current,
+              error: event.error,
+            };
+          }
+
+          return current;
+        });
+      },
+      onError: () => {
+        setExecutionError('The live execution stream disconnected.');
+      },
+    });
   }
+
+  function handlePrepareRerun(frame: StoryboardFrame) {
+    setRerunContext({
+      storyboardId: execution?.storyboardId,
+      frameId: frame.id,
+      label: `Re-running from "${frame.title}". Adjust inputs, then run again to inspect a different outcome.`,
+    });
+    setPhase('configure');
+  }
+
+  function handleBackToWorkspace() {
+    setPhase('overview');
+    setExecution(null);
+    setExecutionError(null);
+    executionUnsubscribeRef.current?.();
+    executionUnsubscribeRef.current = null;
+  }
+
+  function handleResetWorkspace() {
+    setWorkspace(null);
+    setExecution(null);
+    setExecutionError(null);
+    setWorkspaceError(null);
+    setSelectedEntryPointId(null);
+    setRerunContext(null);
+    setPhase('intake');
+    workspaceUnsubscribeRef.current?.();
+    workspaceUnsubscribeRef.current = null;
+    executionUnsubscribeRef.current?.();
+    executionUnsubscribeRef.current = null;
+  }
+
+  const executionFrames = execution?.storyboard?.frames || execution?.frames || [];
+  const currentFrame = executionFrames[currentFrameIndex] || null;
 
   return (
-    <div className="flex items-center justify-center h-full">
-      <div className="text-center max-w-md px-6">
-        <h2 className="text-lg font-semibold text-rsd-text mb-2">Runtime Storyboard Debugger</h2>
-        <p className="text-rsd-muted text-sm leading-relaxed mb-4">
-          Select a scenario from the left panel to generate a storyboard.
-          Each scenario exercises a different flow through the target application.
-        </p>
-        <div className="text-xs text-rsd-muted/60 space-y-1">
-          <p>1. Choose a scenario to see what happens</p>
-          <p>2. Click frames to inspect each step</p>
-          <p>3. Follow the causal story through the system</p>
-        </div>
-      </div>
-    </div>
+    <PhaseContainer
+      technicalDetails={technicalDetails}
+      onToggleTechnicalDetails={() => setTechnicalDetails((value) => !value)}
+      showTechnicalToggle={phase !== 'loading'}
+    >
+      {phase === 'intake' && (
+        <WorkspaceIntakeScreen
+          sourceType={sourceType}
+          sourceValue={sourceValue}
+          error={workspaceError}
+          onChangeSourceType={setSourceType}
+          onChangeSourceValue={setSourceValue}
+          onCreateWorkspace={handleCreateWorkspace}
+        />
+      )}
+
+      {phase === 'loading' && workspace && (
+        <WorkspaceLoadingScreen
+          workspace={workspace}
+          error={workspaceError}
+          onCreateAnother={handleResetWorkspace}
+        />
+      )}
+
+      {phase === 'overview' && workspace && (
+        <WorkspaceOverviewScreen
+          workspace={workspace}
+          selectedEntryPointId={selectedEntryPointId}
+          technicalDetails={technicalDetails}
+          onCreateAnother={handleResetWorkspace}
+          onSelectEntryPoint={handleOpenWorkspace}
+        />
+      )}
+
+      {phase === 'configure' && workspace && selectedEntryPoint && (
+        <ConfigureScreen
+          entryPoint={selectedEntryPoint}
+          flowGraph={activeFlowGraph}
+          flowLoading={workspace.status !== 'ready'}
+          unfinishedWork={selectedEntryPoint.unfinishedWork.length > 0 ? selectedEntryPoint.unfinishedWork : workspace.unfinishedWork}
+          draftInputs={draftInputs}
+          flagsText={flagsText}
+          technicalDetails={technicalDetails}
+          error={executionError}
+          rerunLabel={rerunContext?.label || null}
+          onChangeInput={(key, value) => setDraftInputs((prev) => ({ ...prev, [key]: value }))}
+          onChangeFlagsText={setFlagsText}
+          onRun={handleRunSelected}
+          onLoadExampleSet={(exampleSet) => {
+            setDraftInputs((prev) => {
+              const next = { ...prev };
+              for (const [key, value] of Object.entries(exampleSet.values)) {
+                if (typeof value === 'boolean') {
+                  next[key] = value;
+                } else if (typeof value === 'object' && value !== null) {
+                  next[key] = JSON.stringify(value, null, 2);
+                } else {
+                  next[key] = value === undefined ? '' : String(value);
+                }
+              }
+              return next;
+            });
+          }}
+          onClearRerunContext={() => setRerunContext(null)}
+          onBack={() => setPhase('overview')}
+        />
+      )}
+
+      {phase === 'execute' && workspace && selectedEntryPoint && execution && (
+        <LiveExecutionScreen
+          workspace={workspace}
+          entryPoint={selectedEntryPoint}
+          execution={execution}
+          currentFrame={currentFrame}
+          currentFrameIndex={currentFrameIndex}
+          technicalDetails={technicalDetails}
+          onSelectFrameIndex={setCurrentFrameIndex}
+          onBackToWorkspace={handleBackToWorkspace}
+          onReconfigure={() => setPhase('configure')}
+          onPrepareRerun={handlePrepareRerun}
+        />
+      )}
+    </PhaseContainer>
   );
+}
+
+function createDraftInputs(fields: EntryPointInputField[]): Record<string, string | boolean> {
+  return Object.fromEntries(
+    fields.map((field) => {
+      if (field.type === 'boolean') return [field.key, Boolean(field.defaultValue)];
+      if (field.type === 'json') return [field.key, JSON.stringify(field.defaultValue ?? {}, null, 2)];
+      return [field.key, field.defaultValue === undefined ? '' : String(field.defaultValue)];
+    }),
+  );
+}
+
+function materializeInputs(
+  fields: EntryPointInputField[],
+  draftInputs: Record<string, string | boolean>,
+): Record<string, unknown> {
+  const inputs: Record<string, unknown> = {};
+
+  for (const field of fields) {
+    const rawValue = draftInputs[field.key];
+    if (field.type === 'boolean') {
+      inputs[field.key] = Boolean(rawValue);
+      continue;
+    }
+
+    const textValue = typeof rawValue === 'string' ? rawValue.trim() : String(rawValue ?? '').trim();
+    if (!textValue) {
+      if (field.defaultValue !== undefined) inputs[field.key] = field.defaultValue;
+      continue;
+    }
+
+    if (field.type === 'number') {
+      const parsed = Number(textValue);
+      if (Number.isNaN(parsed)) throw new Error(`"${field.label}" must be a number.`);
+      inputs[field.key] = parsed;
+      continue;
+    }
+
+    if (field.type === 'json') {
+      inputs[field.key] = parseJsonValue(textValue, field.label);
+      continue;
+    }
+
+    inputs[field.key] = textValue;
+  }
+
+  return inputs;
+}
+
+function parseJsonObject(value: string, label: string): Record<string, unknown> {
+  const parsed = parseJsonValue(value, label);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${label} must be a JSON object.`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function parseJsonValue(value: string, label: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new Error(`${label} must contain valid JSON.`);
+  }
 }

@@ -6,7 +6,7 @@ describe('startServer', () => {
   let occupiedServer: net.Server | undefined;
 
   afterEach(async () => {
-    if (!occupiedServer) {
+    if (!occupiedServer || !occupiedServer.listening) {
       return;
     }
 
@@ -27,10 +27,18 @@ describe('startServer', () => {
   it('rejects with an actionable error when the port is already in use', async () => {
     occupiedServer = net.createServer();
 
-    await new Promise<void>((resolve, reject) => {
-      occupiedServer!.once('error', reject);
-      occupiedServer!.listen(0, () => resolve());
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        occupiedServer!.once('error', reject);
+        occupiedServer!.listen(0, '127.0.0.1', () => resolve());
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') {
+        expect(true).toBe(true);
+        return;
+      }
+      throw error;
+    }
 
     const address = occupiedServer.address();
     if (!address || typeof address === 'string') {

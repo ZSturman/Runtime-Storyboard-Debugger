@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest a new capability or change in behavior.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Please describe the **user problem first**, then the proposed shape. Feature requests that don't fit the current phase of [docs/release-plan.md](../../docs/release-plan.md) may be deferred.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: The user / workflow problem. Don't jump to a solution yet.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: One or more ideas for how RSD could solve it. Sketches/mockups welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about, including doing nothing.
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope check
+      description: Does this fit the current roadmap (`docs/release-plan.md`)? If you're not sure, that's fine.

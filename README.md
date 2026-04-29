@@ -1,125 +1,194 @@
 # Runtime Storyboard Debugger
 
-**Turn software behavior into navigable causal stories.**
+> **Status:** pre-1.0, public roadmap. See [docs/release-plan.md](docs/release-plan.md) and [docs/v1-scope.md](docs/v1-scope.md) for what's shipping and what's deferred.
 
-Runtime Storyboard Debugger (RSD) is a developer tool that combines static code analysis with runtime tracing to produce human-readable storyboards of how code actually executes. Instead of stepping through breakpoints, you get a narrative: which functions ran, why each branch was taken, what side effects occurred, and how async operations handed off.
+Understand an unfamiliar codebase by turning repo structure and runtime behavior into a visible, navigable storyboard.
 
----
+Runtime Storyboard Debugger helps two kinds of people quickly:
 
-## Key Features
+- Developers who need to debug or extend a repo they have never seen before
+- Stakeholders who want a readable walkthrough of what an app is doing
 
-- **Entry Point Discovery** — Automatically finds HTTP routes, exported functions, and main entry patterns via AST analysis
-- **Flow Graph Construction** — Builds static control flow graphs showing possible paths through functions
-- **Runtime Instrumentation** — Babel plugin transforms code to emit trace events without modifying source files
-- **Storyboard Generation** — Converts raw trace events into linked narrative frames with human-readable descriptions
-- **Branch Explanation** — Shows *why* each conditional was taken, with actual runtime variable values
-- **Side Effect Visibility** — Surfaces database writes, HTTP calls, notifications, and other impactful operations
-- **Async Causality** — Tracks execution across async boundaries with continuation linking
-- **Template-Based Narration** — No LLM dependency; deterministic, offline-capable descriptions
+Instead of hiding behind a loading spinner, RSD shows the pipeline in public:
 
-## Architecture
+- repo ingestion
+- dependency discovery
+- static analysis
+- runtime instrumentation
+- execution
+- fallback analysis
 
-```
-packages/
-  core/           # Analysis engine, instrumenter, runtime, server, CLI
-    src/
-      analyzer/     # Entry point discovery + flow graph builder
-      instrumenter/ # Babel plugin + AsyncLocalStorage runtime
-      storyboard/   # Types, frame builder, narrator
-      server/       # Express API
-      cli/          # Commander CLI
-  ui/             # React + Vite + Tailwind web interface
-examples/
-  order-api/      # Example application with 5 test scenarios
-tests/
-  unit/           # Unit tests (analyzer, instrumenter, storyboard)
-  scenarios/      # Integration tests (full pipeline)
-```
+Then, when you trace a route or exported function, RSD shows the current step, current function or route, branch reasons, variable snapshots, side effects, waits, logs, returns, and failures as the run unfolds.
 
-## Quick Start
+## Why This Exists
 
-### Install
+Most code understanding tools force a tradeoff:
 
-```bash
-npm install
-```
+- static graphs show what could happen, but not what actually happened
+- debuggers show what happened, but not in a repo-first, onboarding-friendly way
+- LLM explanations can be helpful, but they often hide uncertainty or skip over the underlying evidence
 
-### Run Tests
+RSD is built to make the evidence visible first and the interpretation optional.
 
-```bash
-npm test
-```
+## What It Does
 
-### Analyze an Application
-
-```bash
-# Discover entry points and start the API server
-npx ts-node packages/core/src/cli/index.ts analyze examples/order-api
-
-# If port 3001 is already in use
-npx ts-node packages/core/src/cli/index.ts analyze examples/order-api --port 3002
-
-# Run a specific scenario
-npx ts-node packages/core/src/cli/index.ts run examples/order-api --scenario examples/order-api/scenarios/straight-through.ts
-```
-
-### Start the Web UI
-
-```bash
-# Terminal 1: Start the API server
-npx ts-node packages/core/src/cli/index.ts analyze examples/order-api
-
-# Terminal 2: Start the React dev server
-cd packages/ui && npx vite
-
-# If the API is running on a different port
-cd packages/ui && RSD_API_URL=http://localhost:3002 npx vite
-```
-
-Open http://localhost:3000 to explore storyboards.
-
-## Example Scenarios
-
-The included `examples/order-api` application exercises all core capabilities:
-
-| Scenario | What It Tests |
-|---|---|
-| **Straight-Through** | Happy path, no branching — clean causal chain |
-| **Conditional Branch** | Order > $100 triggers discount — branch explanation with values |
-| **Validation Failure** | Empty order → early exit — shortened story, error frame |
-| **Async Handoff** | `notify=true` → async email — cross-boundary causality |
-| **Side Effects** | Multiple items → inventory updates — visible state changes |
-
-## API Endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/entry-points` | List discovered entry points |
-| `GET` | `/api/entry-points/:id/flow` | Get flow graph for an entry point |
-| `POST` | `/api/run` | Execute a scenario and get its storyboard |
-| `GET` | `/api/storyboards` | List all recorded storyboards |
-| `GET` | `/api/storyboards/:id` | Get a specific storyboard |
-| `GET` | `/api/source` | Get source code snippet with context |
-| `GET` | `/api/scenarios` | List available scenario files |
+- Open a local path or a public GitHub repository URL
+- Detect routes, exported functions, startup files, package scripts, and likely user journeys automatically
+- Build flow graphs and unfinished-work findings before any runtime execution starts
+- Stream execution into a live timeline instead of waiting for one final result
+- Let you scrub backward and forward through already-captured steps
+- Fall back to the best available static analysis when runtime tracing stalls or fails
+- Offer optional LLM assistance for path discovery, explanations, uncertainty callouts, and alternate traces
 
 ## How It Works
 
-1. **Static Analysis** — Babel parser reads the target codebase AST, finding entry points and building flow graphs
-2. **Instrumentation** — A Babel plugin transforms scenario files (and their imports) to inject tracing calls at function boundaries, branch points, await expressions, and known side-effect patterns
-3. **Execution** — The scenario runs inside an `AsyncLocalStorage` context that collects `TraceEvent` objects
-4. **Frame Building** — Raw events are converted into linked `StoryboardFrame` objects with proper sequencing and async continuation links
-5. **Narration** — Template-based narrator generates human-readable titles and descriptions for each frame
+1. Create a workspace from a local directory or GitHub URL.
+2. RSD ingests the repo and surfaces progress while it is happening.
+3. Static analysis discovers entry points, routes, startup paths, scripts, blockers, and likely journeys.
+4. You choose a route or exported function and provide inputs.
+5. RSD streams execution events into a live storyboard.
+6. If runtime tracing cannot complete, RSD keeps the experience useful by explaining the blocker and showing fallback analysis.
 
-## Tech Stack
+## Quick Start
 
-- **TypeScript** — Strict mode, monorepo with npm workspaces
-- **Babel** — AST parsing, traversal, code generation, and plugin system
-- **Node.js AsyncLocalStorage** — Trace context propagation across async boundaries
-- **Express** — API server
-- **React 18 + Vite 5 + Tailwind CSS 3** — Web interface
-- **Vitest** — Testing framework
-- **Commander** — CLI argument parsing
+Requires **Node.js 20+** and npm 10+.
 
-## Project Status
+```bash
+git clone https://github.com/ZSturman/Runtime-Storyboard-Debugger.git
+cd Runtime-Storyboard-Debugger
+npm install
+npm run dev
+```
 
-This is an MVP demonstrating the core concept. See [docs/mvp-scope.md](docs/mvp-scope.md) for scope details and [docs/testing-guide.md](docs/testing-guide.md) for the test plan.
+`npm run dev` starts the API server (with `examples/order-api` preloaded) and the Vite UI together. Open [http://localhost:3000](http://localhost:3000).
+
+### Advanced: run the pieces separately
+
+If you need to target a different repo or port, run the two halves directly.
+
+Terminal 1 — API server:
+
+```bash
+npx ts-node packages/core/src/cli/index.ts analyze <path-to-target> --port 3001
+```
+
+Terminal 2 — UI:
+
+```bash
+cd packages/ui
+RSD_API_URL=http://localhost:3001 npx vite
+```
+
+## Recommended Demo Targets
+
+- Local: `examples/order-api`
+- GitHub: `mjgs/minimal-express-typescript`
+- GitHub: `expressjs/express`
+- GitHub: `gothinkster/node-express-realworld-example-app`
+
+The last two are especially useful for testing graceful fallback when runtime setup is incomplete or expensive.
+
+## UI Flow
+
+### Workspace Intake
+
+- Choose `Local path` or `GitHub URL`
+- Create a workspace
+- Watch ingestion and analysis progress instead of waiting on a blank state
+
+### Workspace Overview
+
+- Review likely journeys
+- Inspect detected entry points
+- Check runtime blockers and detected scripts
+- Optionally configure LLM assistance
+
+### Live Execution
+
+- Start an explicit trace for a supported route or exported function
+- Watch the timeline fill with status updates, calls, branches, waits, logs, snapshots, side effects, returns, and failures
+- Scrub through captured steps while the run is still active
+
+### Fallback Analysis
+
+- If execution fails or stalls, RSD shows the blocker clearly
+- The flow graph, unfinished work, and other static artifacts stay visible so the workspace still feels trustworthy
+
+## Optional LLM Assistance
+
+> **Note for v1.0:** the LLM panel is being removed from the v1.0 launch and reintroduced post-launch. The code still exists in the current build but is not part of the supported flow. See [docs/release-plan.md](docs/release-plan.md).
+
+LLM help is opt-in and session-only.
+
+- Providers: OpenAI, Anthropic, Gemini, OpenRouter
+- API keys are kept in memory only
+- Model lists are fetched when the provider supports it, otherwise curated defaults are shown
+- The LLM layer is used for explanation and prioritization, not for baseline repo ingestion or core tracing
+
+## Architecture
+
+```text
+packages/
+  core/
+    analyzer/        entry points, unfinished work, flow graphs
+    instrumenter/    runtime tracing + Babel instrumentation
+    server/          workspace sessions, GitHub ingestion, SSE streams, execution sessions, LLM endpoints
+    storyboard/      frame building + narration
+  ui/
+    src/components/  intake, loading, overview, live execution, step inspection
+examples/
+  order-api/         sample local app for end-to-end exploration
+tests/
+  unit/              analyzer, instrumenter, storyboard, server helpers
+```
+
+## Screenshots And Diagrams
+
+For a stronger GitHub presentation, add these assets near the top of the README:
+
+- A hero screenshot of the live execution workspace while a trace is actively streaming
+- A screenshot of the workspace overview showing journeys, entry points, blockers, and scripts
+- A short GIF of a run progressing from analysis to live execution to fallback
+- A simple architecture diagram showing `Ingest -> Analyze -> Trace -> Explain`
+
+If you add screenshots, place them directly under `What It Does` and keep captions short and outcome-oriented.
+
+## Current Scope
+
+Included now:
+
+- local path ingestion
+- public GitHub repo ingestion
+- automatic entry-point and journey discovery
+- live execution streaming with inspectable steps
+- workspace-level fallback states
+- optional multi-provider LLM assist flow
+
+Not included yet:
+
+- private GitHub repo auth
+- automatic remote runtime execution without explicit user action
+- persistent LLM credential storage
+- multi-language analysis beyond JS/TS
+- IDE integration
+- collaborative annotations and sharing
+
+## Validation
+
+```bash
+npm run lint
+npm test
+npm run build
+```
+
+## License
+
+[MIT](LICENSE) © Zachary Sturman
+
+## Design Principles
+
+- Fast repo understanding beats hidden magic
+- Live progress beats vague loading states
+- Trustworthy fallback beats broken execution
+- Static evidence comes before LLM interpretation
+- Technical detail stays available without overwhelming non-developers

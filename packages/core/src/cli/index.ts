@@ -30,76 +30,37 @@ program
 
 program
   .command('analyze')
-  .description('Discover entry points in a target directory and start the debug server')
-  .argument('<target>', 'Path to the target application directory')
+  .description('Start the debug server and optionally preload a local workspace')
+  .argument('[target]', 'Optional path to the target application directory')
   .option('-p, --port <port>', 'Server port', '3001')
   .option('--ui <path>', 'Path to built UI directory')
-  .action(async (target: string, opts: { port: string; ui?: string }) => {
+  .action(async (target: string | undefined, opts: { port: string; ui?: string }) => {
     try {
-      const targetDir = path.resolve(target);
       const port = parsePortOption(opts.port);
+      let targetDir: string | undefined;
 
-      console.log(`\nAnalyzing: ${targetDir}\n`);
+      if (target) {
+        targetDir = path.resolve(target);
+        console.log(`\nAnalyzing: ${targetDir}\n`);
 
-      const entryPoints = await discoverEntryPoints(targetDir);
-      console.log(`Found ${entryPoints.length} entry point(s):\n`);
-      for (const ep of entryPoints) {
-        console.log(`  [${ep.type}] ${ep.name}`);
-        console.log(`    File: ${ep.file}:${ep.line}`);
-        console.log(`    ${ep.description}\n`);
+        const entryPoints = await discoverEntryPoints(targetDir);
+        console.log(`Found ${entryPoints.length} entry point(s):\n`);
+        for (const ep of entryPoints) {
+          console.log(`  [${ep.type}] ${ep.name}`);
+          console.log(`    File: ${ep.file}:${ep.line}`);
+          console.log(`    ${ep.description}\n`);
+        }
+      } else {
+        console.log('\nStarting Runtime Storyboard Debugger without a preloaded workspace.\n');
       }
 
       const uiDistPath = opts.ui
         ? path.resolve(opts.ui)
         : path.resolve(__dirname, '../../ui/dist');
 
-      await startServer({ targetDir, port, uiDistPath });
+      await startServer({ targetDir: targetDir || process.cwd(), port, uiDistPath });
     } catch (error) {
       reportCommandError(error);
-    }
-  });
-
-program
-  .command('run')
-  .description('Instrument and run a scenario, then start the server with the storyboard')
-  .argument('<target>', 'Path to the target application directory')
-  .requiredOption('-s, --scenario <path>', 'Path to scenario file (relative to target)')
-  .option('-p, --port <port>', 'Server port', '3001')
-  .option('--ui <path>', 'Path to built UI directory')
-  .action(async (target: string, opts: { scenario: string; port: string; ui?: string }) => {
-    try {
-      const targetDir = path.resolve(target);
-      const port = parsePortOption(opts.port);
-
-      console.log(`\nTarget: ${targetDir}`);
-      console.log(`Scenario: ${opts.scenario}\n`);
-
-      const uiDistPath = opts.ui
-        ? path.resolve(opts.ui)
-        : path.resolve(__dirname, '../../ui/dist');
-
-      await startServer({ targetDir, port, uiDistPath });
-
-      // Auto-run the scenario via the API
-      const response = await fetch(`http://localhost:${port}/api/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scenarioPath: opts.scenario, targetDir }),
-      });
-      const data: any = await response.json();
-      if (data.storyboard) {
-        console.log(`Storyboard generated: ${data.storyboard.metadata.totalFrames} frames`);
-        console.log(`View at: http://localhost:${port}\n`);
-      } else {
-        console.error('Failed to generate storyboard:', data.error);
-      }
-    } catch (err) {
-      if (err instanceof ServerStartupError) {
-        reportCommandError(err);
-        return;
-      }
-
-      console.error('\nNote: Could not auto-run scenario. Use the UI to run scenarios manually.\n');
     }
   });
 

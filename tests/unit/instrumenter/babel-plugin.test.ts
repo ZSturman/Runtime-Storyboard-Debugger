@@ -22,16 +22,17 @@ describe('Babel Instrumentation Plugin', () => {
   it('instruments function declarations with enter/exit calls', () => {
     const code = `function hello(name) { return name; }`;
     const output = transform(code);
-    expect(output).toContain('__rsd.enter');
-    expect(output).toContain('__rsd.exit');
+    expect(output).toContain('__rsd().enter');
+    expect(output).toContain('__rsd().exit');
     expect(output).toContain('"hello"');
+    expect(output).toContain('"name"');
   });
 
   it('instruments arrow functions', () => {
     const code = `const greet = (name) => name.toUpperCase();`;
     const output = transform(code);
-    expect(output).toContain('__rsd.enter');
-    expect(output).toContain('__rsd.exit');
+    expect(output).toContain('__rsd().enter');
+    expect(output).toContain('__rsd().exit');
   });
 
   it('instruments if statements with branch tracking', () => {
@@ -45,7 +46,7 @@ describe('Babel Instrumentation Plugin', () => {
       }
     `;
     const output = transform(code);
-    expect(output).toContain('__rsd.branch');
+    expect(output).toContain('__rsd().branch');
     expect(output).toContain('x > 10');
   });
 
@@ -58,7 +59,7 @@ describe('Babel Instrumentation Plugin', () => {
       }
     `;
     const output = transform(code);
-    expect(output).toContain('__rsd.branch');
+    expect(output).toContain('__rsd().branch');
     expect(output).toContain('order.total > 100');
   });
 
@@ -69,8 +70,21 @@ describe('Babel Instrumentation Plugin', () => {
       }
     `;
     const output = transform(code);
-    expect(output).toContain('__rsd.sideEffect');
+    expect(output).toContain('__rsd().sideEffect');
     expect(output).toContain('"log"');
+    expect(output).toContain("'processing'");
+  });
+
+  it('adds await snapshots around awaited expressions', () => {
+    const code = `
+      async function loadData(fetcher) {
+        return await fetcher();
+      }
+    `;
+    const output = transform(code);
+    expect(output).toContain('__rsd().awaitStart');
+    expect(output).toContain('__rsd().awaitEnd');
+    expect(output).toContain('fetcher');
   });
 
   it('preserves original source semantics', () => {
@@ -83,7 +97,7 @@ describe('Babel Instrumentation Plugin', () => {
   it('handles functions with no parameters', () => {
     const code = `function noop() { }`;
     const output = transform(code);
-    expect(output).toContain('__rsd.enter("noop"');
+    expect(output).toContain('__rsd().enter("noop"');
   });
 
   it('does not crash on complex code', () => {

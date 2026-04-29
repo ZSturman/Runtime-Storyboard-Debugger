@@ -17,6 +17,21 @@ export type {
   AnalysisResult,
   RunRequest,
   SourceSnippet,
+  WorkspaceSource,
+  CreateWorkspaceRequest,
+  WorkspacePhase,
+  WorkspacePhaseState,
+  WorkspaceStatus,
+  DetectedScript,
+  StartupFile,
+  ExportedSymbol,
+  LikelyUserJourney,
+  RuntimeBlocker,
+  LlmProvider,
+  LlmProviderConfig,
+  LlmModelOption,
+  WorkspaceSession,
+  WorkspaceStreamEvent,
 } from './types';
 
 export { buildFrames, buildStoryboard } from './frame-builder';

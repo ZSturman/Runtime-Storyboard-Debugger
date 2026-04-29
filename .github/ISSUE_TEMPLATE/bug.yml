@@ -1,0 +1,75 @@
+name: Bug report
+description: Something is broken or behaving unexpectedly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please fill in as much as you can — incomplete reports may be closed.
+  - type: input
+    id: version
+    attributes:
+      label: RSD version
+      description: Output of `npx rsd --version` or the git commit you tested.
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      description: Output of `node --version`.
+      placeholder: "v20.11.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: target-language
+    attributes:
+      label: Target codebase language
+      options:
+        - JavaScript
+        - TypeScript
+        - Python
+        - Other / not applicable
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands and clicks. Include the target repo if it's public.
+      placeholder: |
+        1. `git clone …`
+        2. `npx rsd .`
+        3. Click "…"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include any error messages, stack traces, or relevant terminal/UI output.
+    validations:
+      required: true
+  - type: textarea
+    id: extras
+    attributes:
+      label: Additional context
+      description: Screenshots, `.rsd` export, related issues — optional but helpful.
