@@ -1,6 +1,6 @@
 {
   "name": "runtime-storyboard-debugger",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Turn software behavior into a navigable causal story for debugging and codebase comprehension.",
   "license": "MIT",
