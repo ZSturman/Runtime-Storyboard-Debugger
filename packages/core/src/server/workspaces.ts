@@ -5,7 +5,7 @@ import { execFile } from 'child_process';
 import { randomUUID } from 'crypto';
 import { promisify } from 'util';
 import { glob } from 'glob';
-import { analyzeUnfinishedWork, buildFlowGraph, discoverEntryPoints } from '../analyzer';
+import { ANALYZER_IGNORE_GLOBS, analyzeUnfinishedWork, buildFlowGraph, discoverEntryPoints } from '../analyzer';
 import type {
   CreateWorkspaceRequest,
   DetectedScript,
@@ -74,7 +74,10 @@ function sanitizeSegment(value: string): string {
 
 function cloneUrlForSource(source: WorkspaceSource): string {
   if (!source.owner || !source.repo) {
-    throw new Error('GitHub source is missing owner/repo details.');
+    throw new Error(
+      '[github_source_incomplete] GitHub source is missing owner/repo details. ' +
+        'Suggested action: paste the full repository URL, for example https://github.com/owner/repo.',
+    );
   }
   return `https://github.com/${source.owner}/${source.repo}.git`;
 }
@@ -101,16 +104,25 @@ export function parseGitHubUrl(rawUrl: string): WorkspaceSource {
   try {
     parsed = new URL(rawUrl);
   } catch {
-    throw new Error('Invalid GitHub URL.');
+    throw new Error(
+      '[github_url_invalid] Could not parse the value as a URL. ' +
+        'Suggested action: paste a full URL such as https://github.com/owner/repo.',
+    );
   }
 
   if (parsed.hostname !== 'github.com') {
-    throw new Error('Only github.com URLs are supported in this release.');
+    throw new Error(
+      '[github_host_unsupported] Only github.com URLs are supported in this release. ' +
+        'Suggested action: clone the repository locally and rerun rsd with --target <local-path>.',
+    );
   }
 
   const parts = parsed.pathname.split('/').filter(Boolean);
   if (parts.length < 2) {
-    throw new Error('GitHub URL must include an owner and repository name.');
+    throw new Error(
+      '[github_url_incomplete] GitHub URL must include an owner and repository name. ' +
+        'Suggested action: use the form https://github.com/<owner>/<repo>.',
+    );
   }
 
   const owner = parts[0];
@@ -691,6 +703,6 @@ export async function collectSourceFiles(targetDir: string): Promise<string[]> {
   return glob('**/*.{ts,js,tsx,jsx}', {
     cwd: targetDir,
     absolute: true,
-    ignore: ['**/node_modules/**', '**/dist/**', '**/build/**', '**/.git/**', '**/*.d.ts', '**/*.test.*', '**/*.spec.*'],
+    ignore: ANALYZER_IGNORE_GLOBS,
   });
 }

@@ -27,7 +27,7 @@ export function WorkspaceIntakeScreen({
           </h1>
           <p className="mt-4 max-w-2xl text-sm leading-7 text-rsd-text/80">
             Point Runtime Storyboard Debugger at a local folder or a public GitHub repo. It will ingest the codebase,
-            detect likely entry points and user journeys, and then let you trace a run step by step with branch reasons,
+            detect entry points and suggest where to start, and then let you trace a run step by step with branch reasons,
             snapshots, waits, outputs, and fallbacks when runtime execution is incomplete.
           </p>
 
@@ -77,7 +77,7 @@ export function WorkspaceIntakeScreen({
           </div>
 
           {error && (
-            <div className="mt-4 rounded-2xl border border-rsd-error/30 bg-rsd-error/10 px-4 py-3 text-sm text-rsd-error">
+            <div className="mt-4 rounded-2xl border border-rsd-error/30 bg-rsd-error/10 px-4 py-3 text-sm text-rsd-error whitespace-pre-line">
               {error}
             </div>
           )}
@@ -100,9 +100,9 @@ export function WorkspaceIntakeScreen({
           <div className="mt-5 space-y-4">
             {[
               ['Repo ingestion', 'Clone or validate the source and surface progress instead of a blank wait state.'],
-              ['Automatic understanding', 'Entry points, routes, startup files, scripts, blockers, and likely journeys appear first.'],
+              ['Automatic understanding', 'Entry points, routes, startup files, scripts, and suggested places to start appear first.'],
               ['Live execution', 'Current step, current function, branches, snapshots, waits, returns, and logs update while the run is happening.'],
-              ['Graceful fallback', 'If runtime tracing stalls or fails, static analysis stays visible with a blocker explanation.'],
+              ['Static analysis', 'If runtime tracing stalls or fails, RSD keeps the source-level analysis visible with an explanation of what blocked it.'],
             ].map(([title, detail]) => (
               <div key={title} className="rounded-2xl border border-rsd-border/70 bg-rsd-surface/50 p-4">
                 <div className="text-sm font-semibold text-rsd-text">{title}</div>

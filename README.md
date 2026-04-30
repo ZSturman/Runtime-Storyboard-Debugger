@@ -108,6 +108,20 @@ The last two are especially useful for testing graceful fallback when runtime se
 - Start an explicit trace for a supported route or exported function
 - Watch the timeline fill with status updates, calls, branches, waits, logs, snapshots, side effects, returns, and failures
 - Scrub through captured steps while the run is still active
+- Click any branch you didn't take to re-run with inputs aimed at it
+
+### Keyboard Shortcuts
+
+| Key | Action |
+| --- | --- |
+| `←` / `→` | Previous / next step |
+| `↑` / `↓` | Jump back / forward 5 steps |
+| `F` | Focus the flow map |
+| `/` | Filter the timeline |
+| `C` | Re-run with different inputs |
+| `B` | Back to workspace overview |
+| `?` | Open the keyboard shortcut sheet |
+| `Esc` | Close overlays / clear filter |
 
 ### Fallback Analysis
 

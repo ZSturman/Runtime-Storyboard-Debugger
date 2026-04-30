@@ -1,251 +1,337 @@
+import { useMemo, useEffect } from 'react';
+import ReactFlow, {
+  Background,
+  Controls,
+  MiniMap,
+  type Edge,
+  type Node,
+  type NodeProps,
+  Handle,
+  Position,
+  useReactFlow,
+  ReactFlowProvider,
+} from 'reactflow';
+import dagre from 'dagre';
+import 'reactflow/dist/style.css';
 import type { FlowGraph, FlowNode as FlowNodeType } from '../api';
 
 interface FlowMapProps {
   flowGraph: FlowGraph | null;
   highlightedNodeId?: string | null;
+  /** Visual scale; kept for back-compat with prior FlowMap API. */
   compact?: boolean;
+  /** Called when the user clicks a node. */
+  onNodeClick?: (nodeId: string) => void;
 }
 
-export function FlowMap({ flowGraph, highlightedNodeId, compact = false }: FlowMapProps) {
+const NODE_WIDTH = 220;
+const NODE_HEIGHT = 64;
+
+interface NodePalette {
+  symbol: string;
+  border: string;
+  bg: string;
+  borderActive: string;
+  bgActive: string;
+  symbolColor: string;
+}
+
+const PALETTE: Record<string, NodePalette> = {
+  entry: {
+    symbol: '●',
+    border: 'border-blue-400/40',
+    bg: 'bg-blue-400/10',
+    borderActive: 'border-blue-300',
+    bgActive: 'bg-blue-400/25',
+    symbolColor: 'text-blue-300',
+  },
+  branch: {
+    symbol: '◆',
+    border: 'border-amber-400/40',
+    bg: 'bg-amber-400/10',
+    borderActive: 'border-amber-300',
+    bgActive: 'bg-amber-400/25',
+    symbolColor: 'text-amber-300',
+  },
+  loop: {
+    symbol: '↻',
+    border: 'border-fuchsia-400/40',
+    bg: 'bg-fuchsia-400/10',
+    borderActive: 'border-fuchsia-300',
+    bgActive: 'bg-fuchsia-400/25',
+    symbolColor: 'text-fuchsia-300',
+  },
+  await: {
+    symbol: '◇',
+    border: 'border-violet-400/40',
+    bg: 'bg-violet-400/10',
+    borderActive: 'border-violet-300',
+    bgActive: 'bg-violet-400/25',
+    symbolColor: 'text-violet-300',
+  },
+  return: {
+    symbol: '●',
+    border: 'border-emerald-400/40',
+    bg: 'bg-emerald-400/10',
+    borderActive: 'border-emerald-300',
+    bgActive: 'bg-emerald-400/25',
+    symbolColor: 'text-emerald-300',
+  },
+  throw: {
+    symbol: '✕',
+    border: 'border-red-400/40',
+    bg: 'bg-red-400/10',
+    borderActive: 'border-red-300',
+    bgActive: 'bg-red-400/25',
+    symbolColor: 'text-red-300',
+  },
+  'function-call': {
+    symbol: '▶',
+    border: 'border-cyan-400/40',
+    bg: 'bg-cyan-400/10',
+    borderActive: 'border-cyan-300',
+    bgActive: 'bg-cyan-400/25',
+    symbolColor: 'text-cyan-300',
+  },
+  'side-effect': {
+    symbol: '◉',
+    border: 'border-teal-400/40',
+    bg: 'bg-teal-400/10',
+    borderActive: 'border-teal-300',
+    bgActive: 'bg-teal-400/25',
+    symbolColor: 'text-teal-300',
+  },
+};
+
+const FALLBACK_PALETTE: NodePalette = {
+  symbol: '○',
+  border: 'border-rsd-border',
+  bg: 'bg-rsd-bg/60',
+  borderActive: 'border-rsd-accent',
+  bgActive: 'bg-rsd-accent/20',
+  symbolColor: 'text-rsd-muted',
+};
+
+interface FlowNodeData {
+  label: string;
+  type: string;
+  condition?: string;
+  isHighlighted: boolean;
+}
+
+function FlowNodeCard({ data }: NodeProps<FlowNodeData>) {
+  const palette = PALETTE[data.type] || FALLBACK_PALETTE;
+  return (
+    <div
+      className={`relative flex items-start gap-2 rounded-2xl border px-3 py-2 transition-colors ${
+        data.isHighlighted ? `${palette.borderActive} ${palette.bgActive} flow-node-active` : `${palette.border} ${palette.bg}`
+      }`}
+      style={{ width: NODE_WIDTH, minHeight: NODE_HEIGHT }}
+    >
+      <Handle type="target" position={Position.Top} className="!bg-rsd-border !border-0 !w-2 !h-2" />
+      <span className={`mt-0.5 shrink-0 text-sm ${palette.symbolColor}`}>{palette.symbol}</span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] uppercase tracking-[0.18em] text-rsd-muted">{data.type}</span>
+          {data.isHighlighted && (
+            <span className="rounded-full bg-rsd-accent/25 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-rsd-accent">
+              here
+            </span>
+          )}
+        </div>
+        <div className="mt-0.5 truncate text-xs font-medium text-rsd-text">{data.label}</div>
+        {data.condition && <div className="mt-0.5 truncate text-[10px] text-rsd-muted">{data.condition}</div>}
+      </div>
+      <Handle type="source" position={Position.Bottom} className="!bg-rsd-border !border-0 !w-2 !h-2" />
+    </div>
+  );
+}
+
+const NODE_TYPES = { rsd: FlowNodeCard };
+
+interface BuiltGraph {
+  nodes: Node<FlowNodeData>[];
+  edges: Edge[];
+}
+
+function buildGraph(flowGraph: FlowGraph, highlightedNodeId: string | null): BuiltGraph {
+  const dag = new dagre.graphlib.Graph();
+  dag.setDefaultEdgeLabel(() => ({}));
+  dag.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 50, marginx: 16, marginy: 16 });
+
+  const visited = new Set<string>();
+  const queue: string[] = [flowGraph.rootNodeId];
+  const reachable: FlowNodeType[] = [];
+  while (queue.length) {
+    const id = queue.shift()!;
+    if (visited.has(id)) continue;
+    const node = flowGraph.nodes[id];
+    if (!node) continue;
+    visited.add(id);
+    reachable.push(node);
+    for (const childId of node.children || []) queue.push(childId);
+    if (node.branchTrue) queue.push(node.branchTrue);
+    if (node.branchFalse) queue.push(node.branchFalse);
+  }
+
+  for (const node of reachable) {
+    dag.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
+  }
+
+  const edges: Edge[] = [];
+  const seenEdgeIds = new Set<string>();
+  const addEdge = (edge: Edge) => {
+    if (seenEdgeIds.has(edge.id)) return;
+    seenEdgeIds.add(edge.id);
+    edges.push(edge);
+  };
+
+  for (const node of reachable) {
+    if (node.type === 'branch' && (node.branchTrue || node.branchFalse)) {
+      if (node.branchTrue) {
+        dag.setEdge(node.id, node.branchTrue);
+        addEdge({
+          id: `${node.id}->${node.branchTrue}:true`,
+          source: node.id,
+          target: node.branchTrue,
+          label: 'yes',
+          labelStyle: { fill: '#fbbf24', fontSize: 10, fontWeight: 600 },
+          labelBgStyle: { fill: '#1c1d26' },
+          labelBgPadding: [4, 2],
+          style: { stroke: '#fbbf24', strokeWidth: 1.5 },
+        });
+      }
+      if (node.branchFalse) {
+        dag.setEdge(node.id, node.branchFalse);
+        addEdge({
+          id: `${node.id}->${node.branchFalse}:false`,
+          source: node.id,
+          target: node.branchFalse,
+          label: 'no',
+          labelStyle: { fill: '#94a3b8', fontSize: 10, fontWeight: 600 },
+          labelBgStyle: { fill: '#1c1d26' },
+          labelBgPadding: [4, 2],
+          style: { stroke: '#475569', strokeWidth: 1.25, strokeDasharray: '4 3' },
+        });
+      }
+      const branchSet = new Set([node.branchTrue, node.branchFalse].filter(Boolean) as string[]);
+      for (const childId of node.children || []) {
+        if (branchSet.has(childId)) continue;
+        dag.setEdge(node.id, childId);
+        addEdge({
+          id: `${node.id}->${childId}`,
+          source: node.id,
+          target: childId,
+          style: { stroke: '#475569', strokeWidth: 1.25 },
+        });
+      }
+    } else {
+      for (const childId of node.children || []) {
+        dag.setEdge(node.id, childId);
+        addEdge({
+          id: `${node.id}->${childId}`,
+          source: node.id,
+          target: childId,
+          style: { stroke: '#475569', strokeWidth: 1.25 },
+        });
+      }
+    }
+  }
+
+  dagre.layout(dag);
+
+  const nodes: Node<FlowNodeData>[] = reachable.map((node) => {
+    const positioned = dag.node(node.id);
+    return {
+      id: node.id,
+      type: 'rsd',
+      position: { x: positioned.x - NODE_WIDTH / 2, y: positioned.y - NODE_HEIGHT / 2 },
+      data: {
+        label: node.label,
+        type: node.type,
+        condition: node.condition,
+        isHighlighted: node.id === highlightedNodeId,
+      },
+      draggable: false,
+      selectable: true,
+    };
+  });
+
+  return { nodes, edges };
+}
+
+function FlowMapInner({ flowGraph, highlightedNodeId, onNodeClick }: FlowMapProps) {
+  const { nodes, edges } = useMemo(
+    () => (flowGraph ? buildGraph(flowGraph, highlightedNodeId || null) : { nodes: [], edges: [] }),
+    [flowGraph, highlightedNodeId],
+  );
+
+  const reactFlow = useReactFlow();
+
+  // When the highlighted node changes, gently center on it.
+  useEffect(() => {
+    if (!highlightedNodeId || nodes.length === 0) return;
+    const target = nodes.find((n) => n.id === highlightedNodeId);
+    if (!target) return;
+    reactFlow.setCenter(target.position.x + NODE_WIDTH / 2, target.position.y + NODE_HEIGHT / 2, {
+      zoom: 1,
+      duration: 350,
+    });
+  }, [highlightedNodeId, nodes, reactFlow]);
+
   if (!flowGraph) {
     return (
-      <div className="flex items-center justify-center h-48 text-rsd-muted text-sm">
+      <div className="flex h-48 items-center justify-center rounded-2xl border border-rsd-border bg-rsd-bg/40 text-sm text-rsd-muted">
         No flow graph available
       </div>
     );
   }
 
-  return (
-    <div className={compact ? 'space-y-0.5' : 'space-y-1'}>
-      <FlowNodeRenderer
-        graph={flowGraph}
-        nodeId={flowGraph.rootNodeId}
-        highlightedNodeId={highlightedNodeId || null}
-        compact={compact}
-        visited={new Set()}
-        depth={0}
-        isLast={true}
-      />
-    </div>
-  );
-}
-
-interface FlowNodeRendererProps {
-  graph: FlowGraph;
-  nodeId: string;
-  highlightedNodeId: string | null;
-  compact: boolean;
-  visited: Set<string>;
-  depth: number;
-  isLast: boolean;
-}
-
-function FlowNodeRenderer({
-  graph,
-  nodeId,
-  highlightedNodeId,
-  compact,
-  visited,
-  depth,
-  isLast,
-}: FlowNodeRendererProps) {
-  if (visited.has(nodeId)) return null;
-  visited.add(nodeId);
-
-  const node = graph.nodes[nodeId];
-  if (!node) return null;
-
-  const isHighlighted = highlightedNodeId === nodeId;
-  const isBranch = node.type === 'branch';
-  const childIds = getChildIds(node);
+  if (nodes.length === 0) {
+    return (
+      <div className="flex h-48 items-center justify-center rounded-2xl border border-rsd-border bg-rsd-bg/40 text-sm text-rsd-muted">
+        Flow graph is empty
+      </div>
+    );
+  }
 
   return (
-    <div className="relative">
-      {/* Vertical connector from parent */}
-      {depth > 0 && (
-        <div
-          className="absolute left-4 -top-1 w-0.5 h-2 bg-rsd-border"
-          style={{ marginLeft: depth * 20 - 20 }}
-        />
-      )}
-
-      {/* Node card */}
-      <div
-        className={`
-          relative flex items-start gap-2.5 rounded-lg border px-3
-          ${compact ? 'py-1.5' : 'py-2.5'}
-          ${isHighlighted
-            ? 'border-rsd-accent/50 bg-rsd-accent/10 flow-node-active'
-            : 'border-rsd-border/60 bg-rsd-bg/60 hover:border-rsd-border'
-          }
-          transition-colors
-        `}
-        style={{ marginLeft: depth * 20 }}
+    <div className="rsd-flow-map relative h-[460px] overflow-hidden rounded-2xl border border-rsd-border bg-rsd-bg/40">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={NODE_TYPES}
+        onNodeClick={onNodeClick ? (_, node) => onNodeClick(node.id) : undefined}
+        fitView
+        fitViewOptions={{ padding: 0.2, maxZoom: 1.1 }}
+        proOptions={{ hideAttribution: true }}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={!!onNodeClick}
+        zoomOnDoubleClick={false}
       >
-        {/* Node icon */}
-        <NodeIcon type={node.type} isHighlighted={isHighlighted} />
-
-        {/* Node content */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className={`font-medium truncate ${compact ? 'text-xs' : 'text-sm'} ${isHighlighted ? 'text-rsd-text' : 'text-rsd-text/90'}`}>
-              {node.label}
-            </span>
-            {isHighlighted && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rsd-accent/20 text-rsd-accent font-medium shrink-0">
-                HERE
-              </span>
-            )}
-          </div>
-          {isBranch && node.condition && !compact && (
-            <p className="text-xs text-rsd-muted mt-0.5 truncate">
-              {node.condition}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Branch paths */}
-      {isBranch && node.branchTrue && node.branchFalse && (
-        <div
-          className={`grid grid-cols-2 gap-2 ${compact ? 'mt-0.5' : 'mt-1'}`}
-          style={{ marginLeft: depth * 20 + 20 }}
-        >
-          <BranchPath
-            graph={graph}
-            nodeId={node.branchTrue}
-            label="Yes"
-            taken={true}
-            highlightedNodeId={highlightedNodeId}
-            compact={compact}
-            visited={visited}
-            depth={depth + 1}
-          />
-          <BranchPath
-            graph={graph}
-            nodeId={node.branchFalse}
-            label="No"
-            taken={false}
-            highlightedNodeId={highlightedNodeId}
-            compact={compact}
-            visited={visited}
-            depth={depth + 1}
-          />
-        </div>
-      )}
-
-      {/* Regular children (non-branch) */}
-      {!isBranch && childIds.length > 0 && (
-        <div className={compact ? 'mt-0.5' : 'mt-1'}>
-          {childIds.map((childId, i) => (
-            <FlowNodeRenderer
-              key={childId}
-              graph={graph}
-              nodeId={childId}
-              highlightedNodeId={highlightedNodeId}
-              compact={compact}
-              visited={visited}
-              depth={depth + 1}
-              isLast={i === childIds.length - 1}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Branch children that aren't true/false (follow-on after branch) */}
-      {isBranch && getFollowOnChildren(node).length > 0 && (
-        <div className={compact ? 'mt-0.5' : 'mt-1'}>
-          {getFollowOnChildren(node).map((childId, i, arr) => (
-            <FlowNodeRenderer
-              key={childId}
-              graph={graph}
-              nodeId={childId}
-              highlightedNodeId={highlightedNodeId}
-              compact={compact}
-              visited={visited}
-              depth={depth + 1}
-              isLast={i === arr.length - 1}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function BranchPath({
-  graph,
-  nodeId,
-  label,
-  taken,
-  highlightedNodeId,
-  compact,
-  visited,
-  depth,
-}: {
-  graph: FlowGraph;
-  nodeId: string;
-  label: string;
-  taken: boolean;
-  highlightedNodeId: string | null;
-  compact: boolean;
-  visited: Set<string>;
-  depth: number;
-}) {
-  const node = graph.nodes[nodeId];
-
-  return (
-    <div className={`rounded-lg border px-2 py-1.5 ${taken ? 'border-rsd-branch/30 bg-rsd-branch/5' : 'border-rsd-border/40 bg-rsd-bg/30'}`}>
-      <div className="flex items-center gap-1.5 mb-1">
-        <span className={`text-[10px] font-bold uppercase ${taken ? 'text-rsd-branch' : 'text-rsd-muted'}`}>
-          {taken ? '✓' : '○'} {label}
-        </span>
-      </div>
-      {node && !visited.has(nodeId) && (
-        <FlowNodeRenderer
-          graph={graph}
-          nodeId={nodeId}
-          highlightedNodeId={highlightedNodeId}
-          compact={compact}
-          visited={visited}
-          depth={0}
-          isLast={true}
+        <Background gap={18} size={1} color="#262936" />
+        <Controls
+          position="bottom-right"
+          showInteractive={false}
+          className="!rounded-xl !border !border-rsd-border !bg-rsd-bg/80 !shadow-none"
         />
-      )}
+        <MiniMap
+          pannable
+          zoomable
+          className="!rounded-xl !border !border-rsd-border !bg-rsd-bg/80"
+          maskColor="rgba(15,17,23,0.7)"
+          nodeColor={(n) => ((n.data as FlowNodeData)?.isHighlighted ? '#7dd3fc' : '#475569')}
+        />
+      </ReactFlow>
     </div>
   );
 }
 
-function NodeIcon({ type, isHighlighted }: { type: string; isHighlighted: boolean }) {
-  const config: Record<string, { symbol: string; color: string; activeColor: string }> = {
-    entry: { symbol: '●', color: 'text-blue-400/70', activeColor: 'text-blue-400' },
-    branch: { symbol: '◆', color: 'text-amber-400/70', activeColor: 'text-amber-400' },
-    loop: { symbol: '↻', color: 'text-fuchsia-400/70', activeColor: 'text-fuchsia-400' },
-    await: { symbol: '◇', color: 'text-violet-400/70', activeColor: 'text-violet-400' },
-    return: { symbol: '●', color: 'text-green-400/70', activeColor: 'text-green-400' },
-    throw: { symbol: '✕', color: 'text-red-400/70', activeColor: 'text-red-400' },
-    'function-call': { symbol: '▶', color: 'text-cyan-400/70', activeColor: 'text-cyan-400' },
-    'side-effect': { symbol: '◉', color: 'text-emerald-400/70', activeColor: 'text-emerald-400' },
-  };
-
-  const c = config[type] || { symbol: '○', color: 'text-gray-400/70', activeColor: 'text-gray-400' };
-
+export function FlowMap(props: FlowMapProps) {
   return (
-    <span className={`text-sm shrink-0 mt-0.5 ${isHighlighted ? c.activeColor : c.color}`}>
-      {c.symbol}
-    </span>
+    <ReactFlowProvider>
+      <FlowMapInner {...props} />
+    </ReactFlowProvider>
   );
-}
-
-function getChildIds(node: FlowNodeType): string[] {
-  return Array.from(
-    new Set(
-      [...(node.children || []), node.branchTrue, node.branchFalse].filter(Boolean) as string[]
-    )
-  );
-}
-
-function getFollowOnChildren(node: FlowNodeType): string[] {
-  const branchIds = new Set([node.branchTrue, node.branchFalse].filter(Boolean));
-  return (node.children || []).filter((id) => !branchIds.has(id));
 }

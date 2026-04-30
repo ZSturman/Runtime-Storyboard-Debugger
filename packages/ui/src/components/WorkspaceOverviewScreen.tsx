@@ -1,4 +1,5 @@
 import type { WorkspaceSession } from '../api';
+import { EmptyState } from './EmptyState';
 import { LlmAssistPanel } from './LlmAssistPanel';
 
 interface WorkspaceOverviewScreenProps {
@@ -7,6 +8,7 @@ interface WorkspaceOverviewScreenProps {
   technicalDetails: boolean;
   onCreateAnother: () => void;
   onSelectEntryPoint: (entryPointId: string) => void;
+  onShowTour?: () => void;
 }
 
 export function WorkspaceOverviewScreen({
@@ -15,6 +17,7 @@ export function WorkspaceOverviewScreen({
   technicalDetails,
   onCreateAnother,
   onSelectEntryPoint,
+  onShowTour,
 }: WorkspaceOverviewScreenProps) {
   return (
     <div className="min-h-screen px-6 py-6 phase-enter">
@@ -25,7 +28,7 @@ export function WorkspaceOverviewScreen({
               <div className="text-xs uppercase tracking-[0.2em] text-rsd-muted">Workspace ready</div>
               <h1 className="mt-2 text-2xl font-bold text-rsd-text">{workspace.sourceLabel}</h1>
               <p className="mt-2 text-sm leading-6 text-rsd-muted">
-                {workspace.entryPoints.length} entry points, {workspace.likelyJourneys.length} likely journeys, {workspace.unfinishedWork.length} attention items.
+                {workspace.entryPoints.length} entry points, {workspace.likelyJourneys.length} suggested starts, {workspace.unfinishedWork.length} attention items.
               </p>
             </div>
             <button
@@ -36,13 +39,38 @@ export function WorkspaceOverviewScreen({
             </button>
           </div>
 
+          {onShowTour && (
+            <div className="mt-3">
+              <button
+                onClick={onShowTour}
+                className="text-xs text-rsd-muted hover:text-rsd-accent transition-colors underline-offset-2 hover:underline"
+              >
+                Show welcome tour
+              </button>
+            </div>
+          )}
+
           <div className="mt-6">
-            <div className="text-xs uppercase tracking-[0.2em] text-rsd-muted">Likely journeys</div>
+            <div className="flex items-center gap-2">
+              <div className="text-xs uppercase tracking-[0.2em] text-rsd-muted">Start here</div>
+              <span
+                className="text-rsd-muted/70 text-[11px]"
+                title="Routes, exported functions, and startup files RSD recommends tracing first based on static analysis."
+              >
+                ⓘ
+              </span>
+            </div>
             <div className="mt-3 space-y-3">
               {workspace.likelyJourneys.length === 0 && (
-                <div className="rounded-2xl border border-rsd-border bg-rsd-bg/30 px-4 py-4 text-sm text-rsd-muted">
-                  No likely journeys were inferred. Browse entry points directly instead.
-                </div>
+                <EmptyState
+                  icon={<span aria-hidden>✨</span>}
+                  title="No suggested starting points yet"
+                  description="RSD couldn't auto-rank a journey for this workspace, but you can still pick any entry point on the right."
+                  hints={[
+                    'Routes and exported functions appear under "Entry points".',
+                    'Add JSDoc, route handlers, or named exports to help RSD highlight a path next time.',
+                  ]}
+                />
               )}
               {workspace.likelyJourneys.map((journey) => (
                 <div key={journey.id} className="rounded-2xl border border-rsd-border bg-rsd-bg/30 px-4 py-4">
@@ -73,15 +101,39 @@ export function WorkspaceOverviewScreen({
         <section className="rounded-3xl border border-rsd-border bg-rsd-bg/40 p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-xs uppercase tracking-[0.2em] text-rsd-muted">Entry points</div>
+              <div className="flex items-center gap-2">
+                <div className="text-xs uppercase tracking-[0.2em] text-rsd-muted">Entry points</div>
+                <span
+                  className="text-rsd-muted/70 text-[11px]"
+                  title="Places where execution can start: HTTP routes, exported functions, and main scripts."
+                >
+                  ⓘ
+                </span>
+              </div>
               <p className="mt-2 text-sm text-rsd-muted">
                 Pick a route, exported function, or startup path to configure and trace.
               </p>
             </div>
-            <div className="text-xs text-rsd-muted">{workspace.cacheState.replace(/-/g, ' ')}</div>
+            {technicalDetails && (
+              <div className="text-xs text-rsd-muted">{workspace.cacheState.replace(/-/g, ' ')}</div>
+            )}
           </div>
 
           <div className="mt-5 grid gap-3">
+            {workspace.entryPoints.length === 0 && (
+              <EmptyState
+                tone="caution"
+                icon={<span aria-hidden>🔍</span>}
+                title="No entry points detected"
+                description="RSD scanned the workspace but didn't find HTTP routes, exported functions, or startup files it can trace."
+                hints={[
+                  'Confirm the path passed to --target points at the project root, not a subfolder of generated output.',
+                  'Make sure functions are exported (named or default) so RSD can call them.',
+                  'Express routes are detected when the app or router is exported as default.',
+                ]}
+                actions={[{ label: 'Choose a different workspace', onClick: onCreateAnother }]}
+              />
+            )}
             {workspace.entryPoints.map((entryPoint) => {
               const runnable = entryPoint.runSupport.status === 'supported';
               const selected = selectedEntryPointId === entryPoint.id;
@@ -124,24 +176,48 @@ export function WorkspaceOverviewScreen({
 
         <div className="space-y-6">
           <section className="rounded-3xl border border-rsd-border bg-rsd-surface/50 p-5">
-            <div className="text-xs uppercase tracking-[0.2em] text-rsd-muted">Runtime readiness</div>
+            <div className="flex items-center gap-2">
+              <div className="text-xs uppercase tracking-[0.2em] text-rsd-muted">Setup needed</div>
+              <span
+                className="text-rsd-muted/70 text-[11px]"
+                title="Things RSD detected that may prevent runtime tracing — missing env vars, install steps, or unsupported runtimes."
+              >
+                ⓘ
+              </span>
+            </div>
             <div className="mt-4 space-y-3">
               {workspace.runtimeBlockers.length === 0 && (
-                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-4 text-sm text-emerald-100">
-                  No immediate runtime blockers detected. You can start from any supported route or function.
-                </div>
+                <EmptyState
+                  tone="positive"
+                  icon={<span aria-hidden>✓</span>}
+                  title="Ready to trace"
+                  description="No setup blockers detected. You can run any supported route or exported function."
+                />
               )}
               {workspace.runtimeBlockers.map((blocker) => (
-                <div key={blocker.id} className="rounded-2xl border border-rsd-border bg-rsd-bg/30 px-4 py-4">
-                  <div className="text-sm font-semibold text-rsd-text">{blocker.title}</div>
-                  <div className="mt-1 text-xs leading-6 text-rsd-muted">{blocker.detail}</div>
+                <div key={blocker.id} className="rounded-2xl border border-amber-500/30 bg-amber-500/5 px-4 py-4">
+                  <div className="flex items-start gap-2">
+                    <span aria-hidden className="mt-0.5 text-amber-300">!</span>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-rsd-text">{blocker.title}</div>
+                      <div className="mt-1 text-xs leading-6 text-rsd-muted">{blocker.detail}</div>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
 
             {workspace.detectedScripts.length > 0 && (
               <div className="mt-5">
-                <div className="text-xs uppercase tracking-[0.2em] text-rsd-muted">Detected scripts</div>
+                <div className="flex items-center gap-2">
+                  <div className="text-xs uppercase tracking-[0.2em] text-rsd-muted">Detected scripts</div>
+                  <span
+                    className="text-rsd-muted/70 text-[11px]"
+                    title="Scripts RSD found in package.json that you might want to run to set up the project before tracing."
+                  >
+                    ⓘ
+                  </span>
+                </div>
                 <div className="mt-3 space-y-2">
                   {workspace.detectedScripts.slice(0, technicalDetails ? workspace.detectedScripts.length : 5).map((script) => (
                     <div key={script.name} className="rounded-xl border border-rsd-border/70 bg-rsd-bg/30 px-3 py-3 text-xs text-rsd-text">

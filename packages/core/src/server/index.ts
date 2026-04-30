@@ -164,10 +164,22 @@ async function ensureAnalysis(config: ServerConfig, cached: CachedAnalysis | nul
     return cached;
   }
 
+  const started = Date.now();
   const [entryPoints, unfinishedWork] = await Promise.all([
     discoverEntryPoints(config.targetDir),
     analyzeUnfinishedWork(config.targetDir),
   ]);
+  const elapsed = Date.now() - started;
+
+  // Soft Phase 1 budget: examples/order-api should analyze in well under 2s.
+  // We log (don't throw) when a workspace exceeds the budget so larger repos still work.
+  const ANALYSIS_BUDGET_MS = 2000;
+  if (elapsed > ANALYSIS_BUDGET_MS) {
+    console.warn(
+      `[rsd:perf] Analysis took ${elapsed}ms (soft budget ${ANALYSIS_BUDGET_MS}ms). ` +
+        `Consider narrowing --target to a subdirectory if this feels slow.`,
+    );
+  }
 
   return {
     entryPoints: attachFindingsToEntryPoints(entryPoints, unfinishedWork),
@@ -213,13 +225,41 @@ export function createServer(config: ServerConfig) {
   let cachedAnalysis: CachedAnalysis | null = null;
   const storyboards = new Map<string, Storyboard>();
 
+  function sendError(
+    res: express.Response,
+    status: number,
+    code: string,
+    message: string,
+    suggestedAction: string,
+    cause?: unknown,
+  ): void {
+    const causeMessage =
+      cause instanceof Error ? cause.message : cause === undefined ? undefined : String(cause);
+    res.status(status).json({
+      error: {
+        code,
+        message,
+        cause: causeMessage,
+        suggestedAction,
+      },
+      // Back-compat: older clients read `error` as a string.
+      message,
+    });
+  }
+
   app.get('/api/entry-points', async (_req, res) => {
     try {
       cachedAnalysis = await ensureAnalysis(config, cachedAnalysis);
       res.json({ entryPoints: cachedAnalysis.entryPoints });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      res.status(500).json({ error: message });
+      sendError(
+        res,
+        500,
+        'analysis_failed',
+        'Could not analyze the target directory.',
+        'Confirm the path passed to --target exists and is a project you have permission to read, then retry. If the failure persists, run with DEBUG=rsd:* for full stack traces.',
+        err,
+      );
     }
   });
 
@@ -228,7 +268,13 @@ export function createServer(config: ServerConfig) {
       cachedAnalysis = await ensureAnalysis(config, cachedAnalysis);
       const entryPoint = cachedAnalysis.entryPoints.find((candidate) => candidate.id === req.params.id);
       if (!entryPoint) {
-        res.status(404).json({ error: 'Entry point not found' });
+        sendError(
+          res,
+          404,
+          'entry_point_not_found',
+          `Entry point "${req.params.id}" not found in this workspace.`,
+          'Refresh the workspace overview — the entry point list may be out of date if files were renamed or deleted since startup.',
+        );
         return;
       }
 
@@ -247,8 +293,14 @@ export function createServer(config: ServerConfig) {
 
       res.json({ flowGraph, unfinishedWork: entryPoint.unfinishedWork });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      res.status(500).json({ error: message });
+      sendError(
+        res,
+        500,
+        'flow_graph_failed',
+        'Could not build the flow graph for this entry point.',
+        'The source file may use unsupported syntax for the static analyzer. Try running it anyway — runtime tracing often works even when static analysis cannot.',
+        err,
+      );
     }
   });
 
@@ -257,7 +309,13 @@ export function createServer(config: ServerConfig) {
       cachedAnalysis = await ensureAnalysis(config, cachedAnalysis);
       const entryPoint = cachedAnalysis.entryPoints.find((candidate) => candidate.id === req.params.id);
       if (!entryPoint) {
-        res.status(404).json({ error: 'Entry point not found' });
+        sendError(
+          res,
+          404,
+          'entry_point_not_found',
+          `Entry point "${req.params.id}" not found in this workspace.`,
+          'Refresh the workspace overview and try selecting the entry point again.',
+        );
         return;
       }
 
@@ -309,8 +367,14 @@ export function createServer(config: ServerConfig) {
         });
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      res.status(500).json({ error: message });
+      sendError(
+        res,
+        500,
+        'run_failed',
+        'The run could not be started.',
+        'Verify the entry point still exists and that required inputs were provided. Check the server console for a stack trace.',
+        err,
+      );
     }
   });
 
@@ -329,7 +393,13 @@ export function createServer(config: ServerConfig) {
   app.get('/api/storyboards/:id', (req, res) => {
     const storyboard = storyboards.get(req.params.id);
     if (!storyboard) {
-      res.status(404).json({ error: 'Storyboard not found' });
+      sendError(
+        res,
+        404,
+        'storyboard_not_found',
+        `Storyboard "${req.params.id}" was not found.`,
+        'Storyboards are kept in memory only. If the server was restarted, re-run the entry point to capture a new storyboard.',
+      );
       return;
     }
     res.json({ storyboard });
@@ -342,17 +412,35 @@ export function createServer(config: ServerConfig) {
       const context = parseInt(req.query.context as string, 10) || 5;
 
       if (!file) {
-        res.status(400).json({ error: 'file query parameter is required' });
+        sendError(
+          res,
+          400,
+          'missing_file_param',
+          'The `file` query parameter is required.',
+          'Append `?file=<relative-path>` to the request URL.',
+        );
         return;
       }
 
       const fullPath = path.resolve(config.targetDir, file);
       if (!fullPath.startsWith(path.resolve(config.targetDir))) {
-        res.status(400).json({ error: 'file must be within target directory' });
+        sendError(
+          res,
+          400,
+          'path_outside_target',
+          'The requested file resolves outside the target directory.',
+          'Use a path relative to the target directory; absolute paths and `..` segments that escape the target are not allowed.',
+        );
         return;
       }
       if (!fs.existsSync(fullPath)) {
-        res.status(404).json({ error: `File not found: ${file}` });
+        sendError(
+          res,
+          404,
+          'source_file_missing',
+          `Source file "${file}" was not found on disk.`,
+          'The file may have been moved, renamed, or deleted since the workspace was analyzed. Refresh the workspace overview to rebuild the index.',
+        );
         return;
       }
 
@@ -374,8 +462,14 @@ export function createServer(config: ServerConfig) {
 
       res.json({ source: snippet });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      res.status(500).json({ error: message });
+      sendError(
+        res,
+        500,
+        'source_read_failed',
+        'Could not read the requested source file.',
+        'Confirm the server has permission to read the file and that it is not locked by another process.',
+        err,
+      );
     }
   });
 

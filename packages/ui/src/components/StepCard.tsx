@@ -7,7 +7,7 @@ interface StepCardProps {
   frame: StoryboardFrame;
   technicalDetails: boolean;
   onPreviewBranch: (option: BranchPathOption) => void;
-  onPrepareRerun: (frame: StoryboardFrame) => void;
+  onPrepareRerun: (frame: StoryboardFrame, branchOption?: BranchPathOption) => void;
   onNavigateToFrame: (frameId: string) => void;
 }
 
@@ -55,43 +55,60 @@ export function StepCard({
       {/* Branch decisions as "doors" */}
       {frame.branch && (
         <section className="space-y-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-rsd-muted">
-            Decision Point
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-rsd-muted">
+              Decision point
+            </h3>
+            <span
+              className="text-rsd-muted/70 text-[11px]"
+              title="The branch the run took is highlighted. Click any other path to re-run with inputs that aim at it."
+            >
+              ⓘ
+            </span>
+          </div>
           <p className="text-sm text-rsd-text leading-relaxed">{frame.branch.explanation}</p>
 
           <div className="grid grid-cols-1 gap-2">
             {frame.branch.options.map((option) => (
               <button
                 key={option.id}
-                onClick={() => onPreviewBranch(option)}
+                onClick={() => {
+                  if (option.taken) {
+                    onPreviewBranch(option);
+                  } else {
+                    onPrepareRerun(frame, option);
+                  }
+                }}
+                onMouseEnter={() => onPreviewBranch(option)}
+                onFocus={() => onPreviewBranch(option)}
                 className={`
                   group w-full text-left rounded-xl border px-4 py-3 transition-all
                   ${option.taken
-                    ? 'border-rsd-branch/40 bg-rsd-branch/10'
-                    : 'border-rsd-border hover:border-rsd-branch-alt/30 hover:bg-rsd-branch-alt/5'
+                    ? 'border-rsd-branch/50 bg-rsd-branch/10 ring-1 ring-rsd-branch/30'
+                    : 'border-rsd-border hover:border-rsd-branch-alt/40 hover:bg-rsd-branch-alt/5 focus:border-rsd-branch-alt/40'
                   }
                 `}
+                title={option.taken ? 'This is the path the run took.' : 'Re-run with inputs aimed at this branch.'}
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2.5">
-                    <span className={`text-sm ${option.taken ? 'text-rsd-branch' : 'text-rsd-muted'}`}>
-                      {option.taken ? '✓' : '○'}
+                    <span className={`text-sm ${option.taken ? 'text-rsd-branch' : 'text-rsd-muted group-hover:text-rsd-branch-alt'}`}>
+                      {option.taken ? '✓' : '↻'}
                     </span>
                     <div>
-                      <div className={`text-sm font-medium ${option.taken ? 'text-rsd-text' : 'text-rsd-text/80'}`}>
+                      <div className={`text-sm font-medium ${option.taken ? 'text-rsd-text' : 'text-rsd-text/85'}`}>
                         {option.label}
                       </div>
                       <div className="text-xs text-rsd-muted mt-0.5">{option.description}</div>
                     </div>
                   </div>
                   {option.taken ? (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-rsd-branch/20 text-rsd-branch shrink-0">
+                    <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-rsd-branch/20 text-rsd-branch shrink-0">
                       taken
                     </span>
                   ) : (
                     <span className="text-xs text-rsd-muted group-hover:text-rsd-branch-alt transition-colors shrink-0">
-                      explore →
+                      re-run this path →
                     </span>
                   )}
                 </div>
@@ -103,7 +120,7 @@ export function StepCard({
             onClick={() => onPrepareRerun(frame)}
             className="text-xs px-3 py-1.5 rounded-lg border border-rsd-border text-rsd-muted hover:text-rsd-text hover:border-rsd-accent/30 transition-colors"
           >
-            Re-run with different inputs to try another path
+            Re-run with custom inputs
           </button>
         </section>
       )}
@@ -112,7 +129,7 @@ export function StepCard({
       {frame.sideEffects.length > 0 && (
         <section className="space-y-2">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-rsd-muted">
-            Side Effects
+            Side effects
           </h3>
           <div className="flex flex-wrap gap-2">
             {frame.sideEffects.map((se, i) => (
@@ -135,7 +152,7 @@ export function StepCard({
       {frame.returnValue !== undefined && (
         <section className="space-y-2">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-rsd-muted">
-            Return Value
+            Return value
           </h3>
           <div className="rounded-lg border border-rsd-border bg-rsd-bg px-4 py-3">
             <p className="text-sm text-rsd-text">{friendlyValue(frame.returnValue)}</p>

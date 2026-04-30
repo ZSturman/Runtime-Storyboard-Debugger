@@ -6,6 +6,7 @@ interface StepNavigationProps {
   onJumpTo: (index: number) => void;
   onStartOver: () => void;
   onReconfigure: () => void;
+  onOpenShortcutSheet?: () => void;
 }
 
 export function StepNavigation({
@@ -16,6 +17,7 @@ export function StepNavigation({
   onJumpTo,
   onStartOver,
   onReconfigure,
+  onOpenShortcutSheet,
 }: StepNavigationProps) {
   const hasPrevious = currentIndex > 0;
   const hasNext = currentIndex < totalSteps - 1;
@@ -91,6 +93,19 @@ export function StepNavigation({
         >
           Start over
         </button>
+        {onOpenShortcutSheet && (
+          <>
+            <span className="text-rsd-border">·</span>
+            <button
+              onClick={onOpenShortcutSheet}
+              className="text-xs text-rsd-muted hover:text-rsd-text transition-colors flex items-center gap-1.5"
+              title="Open keyboard shortcuts (?)"
+            >
+              <kbd className="rounded border border-rsd-border bg-rsd-bg/60 px-1 font-mono text-[10px]">?</kbd>
+              <span>Shortcuts</span>
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

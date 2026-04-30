@@ -57,7 +57,10 @@ function resolveWithinTarget(requesterPath: string, id: string, targetDir: strin
   }
 
   if (!resolved.startsWith(path.resolve(targetDir))) {
-    throw new Error(`Cannot require files outside target directory: ${id}`);
+    throw new Error(
+      `[require_outside_target] Cannot require "${id}" because it resolves outside the target directory. ` +
+        'Suggested action: only require modules that live inside the target project, or rerun rsd with a wider --target.',
+    );
   }
 
   return fs.existsSync(resolved) ? resolved : null;
@@ -139,7 +142,10 @@ function resolveExportedFunction(moduleExports: Record<string, unknown>, entryPo
     }
   }
 
-  throw new Error(`Could not resolve exported function "${entryPoint.name}" from ${entryPoint.file}`);
+  throw new Error(
+    `[entry_point_export_missing] Could not resolve exported function "${entryPoint.name}" from ${entryPoint.file}. ` +
+      'Suggested action: confirm the function is exported (named or default) and that the file compiles. Then refresh the workspace overview.',
+  );
 }
 
 interface MockRequest {
@@ -263,7 +269,10 @@ type RouteLayer = {
 function resolveRouteHandlers(appExport: unknown, entryPoint: EntryPoint): Array<(...args: unknown[]) => unknown> {
   const stack = (appExport as { _router?: { stack?: RouteLayer[] } })?._router?.stack;
   if (!Array.isArray(stack)) {
-    throw new Error(`Could not inspect Express routes from ${entryPoint.file}. Export the app or router as default.`);
+    throw new Error(
+      `[express_app_export_missing] Could not inspect Express routes from ${entryPoint.file}. ` +
+        'Suggested action: export the Express app or router as the default export (e.g. `export default app`).',
+    );
   }
 
   const routeLayer = stack.find((layer) => {
@@ -275,7 +284,10 @@ function resolveRouteHandlers(appExport: unknown, entryPoint: EntryPoint): Array
   });
 
   if (!routeLayer?.route?.stack?.length) {
-    throw new Error(`Could not find route handler for ${entryPoint.name}`);
+    throw new Error(
+      `[route_handler_not_found] Could not find a route handler matching "${entryPoint.name}". ` +
+        'Suggested action: verify the method and path are still registered on the exported app, then refresh the workspace overview.',
+    );
   }
 
   return routeLayer.route.stack.map((routeHandler) => routeHandler.handle);

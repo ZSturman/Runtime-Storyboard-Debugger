@@ -15,6 +15,31 @@ import type {
 
 let entryPointCounter = 0;
 
+/**
+ * Globs that the analyzer should never traverse. Anything generated, vendored,
+ * or test-only would only add noise to the entry-point and unfinished-work
+ * lists. Keep this list in sync with `unfinished-work.ts`.
+ */
+export const ANALYZER_IGNORE_GLOBS = [
+  '**/node_modules/**',
+  '**/dist/**',
+  '**/build/**',
+  '**/.next/**',
+  '**/.nuxt/**',
+  '**/.svelte-kit/**',
+  '**/.turbo/**',
+  '**/.cache/**',
+  '**/.git/**',
+  '**/coverage/**',
+  '**/out/**',
+  '**/.vercel/**',
+  '**/.vscode-test/**',
+  '**/*.d.ts',
+  '**/*.test.*',
+  '**/*.spec.*',
+  '**/*.min.*',
+];
+
 function nextId(): string {
   return `ep_${++entryPointCounter}`;
 }
@@ -491,7 +516,7 @@ export async function discoverEntryPoints(targetDir: string): Promise<EntryPoint
   const files = await glob('**/*.{ts,js,tsx,jsx}', {
     cwd: searchDir,
     absolute: true,
-    ignore: ['**/node_modules/**', '**/*.d.ts', '**/*.test.*', '**/*.spec.*'],
+    ignore: ANALYZER_IGNORE_GLOBS,
   });
 
   const entryPoints: EntryPoint[] = [];

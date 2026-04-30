@@ -37,18 +37,19 @@ export function ConfigureScreen({
   onClearRerunContext,
   onBack,
 }: ConfigureScreenProps) {
-  const [showOptional, setShowOptional] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
-  const visibleFields = entryPoint.inputFields.filter((f) => technicalDetails || !f.hidden);
-  const requiredFields = visibleFields.filter((f) => f.required);
-  const optionalFields = visibleFields.filter((f) => !f.required);
-  const noInput = visibleFields.length === 0;
+  // Field visibility is independent of technical mode now: required fields are always visible,
+  // and optional + hidden fields + execution flags collapse into a single "Show advanced" disclosure.
+  const requiredFields = entryPoint.inputFields.filter((f) => f.required && !f.hidden);
+  const optionalFields = entryPoint.inputFields.filter((f) => !f.required || f.hidden);
+  const noRequired = requiredFields.length === 0;
+  const noFields = entryPoint.inputFields.length === 0;
   const hasExamples = entryPoint.exampleSets && entryPoint.exampleSets.length > 0;
   const locationLabels = technicalDetails ? technicalLocationLabels : friendlyLocationLabels;
 
   const requiredByLocation = groupByLocation(requiredFields);
   const optionalByLocation = groupByLocation(optionalFields);
-  const allByLocation = groupByLocation(visibleFields);
 
   return (
     <div className="min-h-screen flex flex-col phase-enter">
@@ -88,7 +89,7 @@ export function ConfigureScreen({
 
             {/* Error */}
             {error && (
-              <div className="p-4 rounded-xl border border-rsd-error/30 bg-rsd-error/10 text-rsd-error text-sm leading-relaxed">
+              <div className="p-4 rounded-xl border border-rsd-error/30 bg-rsd-error/10 text-rsd-error text-sm leading-relaxed whitespace-pre-line">
                 {error}
               </div>
             )}
@@ -133,7 +134,7 @@ export function ConfigureScreen({
             )}
 
             {/* No-input action */}
-            {noInput && !technicalDetails && (
+            {noFields && (
               <div className="rounded-xl border border-rsd-accent/20 bg-rsd-accent/5 p-6 text-center space-y-4">
                 <p className="text-sm text-rsd-text">No input required — just run it.</p>
                 <button
@@ -147,9 +148,9 @@ export function ConfigureScreen({
             )}
 
             {/* Input fields */}
-            {(!noInput || technicalDetails) && (
+            {!noFields && (
               <>
-                {Object.entries(technicalDetails ? allByLocation : requiredByLocation).map(([location, fields]) => (
+                {!noRequired && Object.entries(requiredByLocation).map(([location, fields]) => (
                   <section key={location} className="space-y-3">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-rsd-muted">
                       {locationLabels[location] || location}
@@ -168,17 +169,23 @@ export function ConfigureScreen({
                   </section>
                 ))}
 
-                {/* Optional fields */}
-                {!technicalDetails && optionalFields.length > 0 && (
-                  <div>
+                {/* Single advanced disclosure: optional fields + hidden fields + execution flags. */}
+                <div>
                     <button
-                      onClick={() => setShowOptional(!showOptional)}
+                      onClick={() => setShowAdvanced((prev) => !prev)}
                       className="text-xs text-rsd-muted hover:text-rsd-text transition-colors flex items-center gap-1"
+                      aria-expanded={showAdvanced}
                     >
-                      <span className="text-[10px]">{showOptional ? '▾' : '▸'}</span>
-                      {showOptional ? 'Hide' : 'Show'} {optionalFields.length} optional field{optionalFields.length !== 1 ? 's' : ''}
+                      <span className="text-[10px]">{showAdvanced ? '▾' : '▸'}</span>
+                      {showAdvanced ? 'Hide advanced' : 'Show advanced'}
+                      {optionalFields.length > 0 && (
+                        <span className="text-rsd-muted/70">
+                          {' '}
+                          ({optionalFields.length} optional field{optionalFields.length !== 1 ? 's' : ''} + execution flags)
+                        </span>
+                      )}
                     </button>
-                    {showOptional && (
+                    {showAdvanced && (
                       <div className="mt-3 space-y-4">
                         {Object.entries(optionalByLocation).map(([location, fields]) => (
                           <section key={location} className="space-y-3">
@@ -198,23 +205,20 @@ export function ConfigureScreen({
                             </div>
                           </section>
                         ))}
+
+                        <section className="space-y-2">
+                          <h3 className="text-xs font-semibold uppercase tracking-wider text-rsd-muted">Execution flags</h3>
+                          <textarea
+                            value={flagsText}
+                            onChange={(e) => onChangeFlagsText(e.target.value)}
+                            rows={4}
+                            className="w-full rounded-lg border border-rsd-border bg-rsd-bg px-3 py-2 text-sm text-rsd-text font-mono focus:outline-none focus:ring-2 focus:ring-rsd-accent/30"
+                            placeholder="--flag value (one per line)"
+                          />
+                        </section>
                       </div>
                     )}
                   </div>
-                )}
-
-                {/* Execution flags (technical mode) */}
-                {technicalDetails && (
-                  <section className="space-y-2">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-rsd-muted">Execution flags</h3>
-                    <textarea
-                      value={flagsText}
-                      onChange={(e) => onChangeFlagsText(e.target.value)}
-                      rows={4}
-                      className="w-full rounded-lg border border-rsd-border bg-rsd-bg px-3 py-2 text-sm text-rsd-text font-mono focus:outline-none focus:ring-2 focus:ring-rsd-accent/30"
-                    />
-                  </section>
-                )}
 
                 {/* Run button */}
                 <div className="pt-2">

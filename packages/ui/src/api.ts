@@ -361,11 +361,41 @@ export interface LlmModelOption {
   source: 'provider' | 'curated';
 }
 
+export interface ApiErrorPayload {
+  code: string;
+  message: string;
+  cause?: string;
+  suggestedAction: string;
+}
+
+export class ApiError extends Error {
+  code: string;
+  cause?: string;
+  suggestedAction: string;
+  status: number;
+
+  constructor(status: number, payload: ApiErrorPayload) {
+    super(payload.message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = payload.code;
+    this.cause = payload.cause;
+    this.suggestedAction = payload.suggestedAction;
+  }
+}
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
-  const data = await response.json();
+  const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.error || `Request failed: ${response.status}`);
+    if (data && typeof data === 'object' && data.error && typeof data.error === 'object' && 'code' in data.error) {
+      throw new ApiError(response.status, data.error as ApiErrorPayload);
+    }
+    const message =
+      (typeof data?.error === 'string' && data.error) ||
+      (typeof data?.message === 'string' && data.message) ||
+      `Request failed: ${response.status}`;
+    throw new Error(message);
   }
   return data as T;
 }

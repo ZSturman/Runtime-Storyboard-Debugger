@@ -1,3 +1,3 @@
-export { discoverEntryPoints, discoverEntryPointsFromSource } from './entry-points';
+export { discoverEntryPoints, discoverEntryPointsFromSource, ANALYZER_IGNORE_GLOBS } from './entry-points';
 export { buildFlowGraph, buildFlowGraphFromSource } from './flow-graph';
 export { analyzeUnfinishedWork, analyzeUnfinishedWorkFromSource } from './unfinished-work';

@@ -54,7 +54,15 @@ export function WorkspaceLoadingScreen({
 
           {workspace.runtimeBlockers.length > 0 && (
             <div className="mt-5 space-y-2">
-              <div className="text-xs uppercase tracking-[0.2em] text-rsd-muted">Early blockers</div>
+              <div className="flex items-center gap-2">
+                <div className="text-xs uppercase tracking-[0.2em] text-rsd-muted">Setup needed</div>
+                <span
+                  className="text-rsd-muted/70 text-[11px]"
+                  title="Things that may need to be set up before runtime tracing can run cleanly."
+                >
+                  ⓘ
+                </span>
+              </div>
               {workspace.runtimeBlockers.slice(0, 4).map((blocker) => (
                 <div key={blocker.id} className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
                   <div className="text-sm font-medium text-amber-100">{blocker.title}</div>
@@ -66,7 +74,15 @@ export function WorkspaceLoadingScreen({
         </section>
 
         <section className="rounded-3xl border border-rsd-border bg-rsd-bg/30 p-6">
-          <div className="text-xs uppercase tracking-[0.2em] text-rsd-muted">Pipeline</div>
+          <div className="flex items-center gap-2">
+            <div className="text-xs uppercase tracking-[0.2em] text-rsd-muted">Pipeline</div>
+            <span
+              className="text-rsd-muted/70 text-[11px]"
+              title="The stages RSD runs to turn your repo into an explorable workspace: clone, install, analyze, build flow graphs."
+            >
+              ⓘ
+            </span>
+          </div>
           <div className="mt-5 space-y-3">
             {phases.map((phase, index) => (
               <div

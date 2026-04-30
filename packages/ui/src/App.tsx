@@ -5,6 +5,8 @@ import {
   startExecutionSession,
   subscribeToExecution,
   subscribeToWorkspace,
+  ApiError,
+  type BranchPathOption,
   type EntryPointInputField,
   type ExecutionSession,
   type StoryboardFrame,
@@ -12,6 +14,8 @@ import {
 } from './api';
 import { PhaseContainer } from './components/PhaseContainer';
 import { ConfigureScreen } from './components/ConfigureScreen';
+import { KeyboardShortcutSheet } from './components/KeyboardShortcutSheet';
+import { OnboardingTour, shouldShowTour } from './components/OnboardingTour';
 import { WorkspaceIntakeScreen } from './components/WorkspaceIntakeScreen';
 import { WorkspaceLoadingScreen } from './components/WorkspaceLoadingScreen';
 import { WorkspaceOverviewScreen } from './components/WorkspaceOverviewScreen';
@@ -34,6 +38,8 @@ export default function App() {
   const [currentFrameIndex, setCurrentFrameIndex] = useState(0);
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [rerunContext, setRerunContext] = useState<{ storyboardId?: string; frameId?: string; label: string } | null>(null);
+  const [shortcutSheetOpen, setShortcutSheetOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
   const workspaceUnsubscribeRef = useRef<(() => void) | null>(null);
   const executionUnsubscribeRef = useRef<(() => void) | null>(null);
 
@@ -117,6 +123,26 @@ export default function App() {
     };
   }, []);
 
+  // Global '?' opens shortcut sheet (ignored while typing in inputs).
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (isTypingTarget(event.target)) return;
+      if (event.key === '?' || (event.shiftKey && event.key === '/')) {
+        event.preventDefault();
+        setShortcutSheetOpen(true);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Open onboarding tour on first time the user reaches Overview.
+  useEffect(() => {
+    if (phase === 'overview' && shouldShowTour()) {
+      setTourOpen(true);
+    }
+  }, [phase]);
+
   async function handleCreateWorkspace() {
     if (!sourceValue.trim()) {
       setWorkspaceError(
@@ -142,7 +168,7 @@ export default function App() {
 
       setWorkspace(nextWorkspace);
     } catch (error) {
-      setWorkspaceError(error instanceof Error ? error.message : String(error));
+      setWorkspaceError(formatApiError(error));
       setPhase('intake');
     }
   }
@@ -176,7 +202,7 @@ export default function App() {
       setPhase('execute');
       subscribeExecutionSession(workspace.id, nextExecution.id);
     } catch (error) {
-      setExecutionError(error instanceof Error ? error.message : String(error));
+      setExecutionError(formatApiError(error));
     }
   }
 
@@ -249,11 +275,15 @@ export default function App() {
     });
   }
 
-  function handlePrepareRerun(frame: StoryboardFrame) {
+  function handlePrepareRerun(frame: StoryboardFrame, branchOption?: BranchPathOption) {
+    const baseLabel = `Re-running from "${frame.title}".`;
+    const label = branchOption
+      ? `${baseLabel} Adjust inputs to take the “${branchOption.label}” path, then Run.`
+      : `${baseLabel} Adjust inputs, then run again to inspect a different outcome.`;
     setRerunContext({
       storyboardId: execution?.storyboardId,
       frameId: frame.id,
-      label: `Re-running from "${frame.title}". Adjust inputs, then run again to inspect a different outcome.`,
+      label,
     });
     setPhase('configure');
   }
@@ -315,6 +345,7 @@ export default function App() {
           technicalDetails={technicalDetails}
           onCreateAnother={handleResetWorkspace}
           onSelectEntryPoint={handleOpenWorkspace}
+          onShowTour={() => setTourOpen(true)}
         />
       )}
 
@@ -364,8 +395,16 @@ export default function App() {
           onBackToWorkspace={handleBackToWorkspace}
           onReconfigure={() => setPhase('configure')}
           onPrepareRerun={handlePrepareRerun}
+          onOpenShortcutSheet={() => setShortcutSheetOpen(true)}
         />
       )}
+
+      <KeyboardShortcutSheet
+        open={shortcutSheetOpen}
+        onClose={() => setShortcutSheetOpen(false)}
+      />
+
+      <OnboardingTour open={tourOpen} onClose={() => setTourOpen(false)} />
     </PhaseContainer>
   );
 }
@@ -378,6 +417,25 @@ function createDraftInputs(fields: EntryPointInputField[]): Record<string, strin
       return [field.key, field.defaultValue === undefined ? '' : String(field.defaultValue)];
     }),
   );
+}
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (target.isContentEditable) return true;
+  return false;
+}
+
+function formatApiError(error: unknown): string {
+  if (error instanceof ApiError) {
+    const parts = [error.message];
+    if (error.cause && error.cause !== error.message) parts.push(`Cause: ${error.cause}`);
+    if (error.suggestedAction) parts.push(`What to try: ${error.suggestedAction}`);
+    return parts.join('\n\n');
+  }
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
 
 function materializeInputs(

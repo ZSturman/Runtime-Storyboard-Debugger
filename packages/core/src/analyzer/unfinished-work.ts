@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { glob } from 'glob';
 import type { UnfinishedWorkFinding } from '../storyboard/types';
+import { ANALYZER_IGNORE_GLOBS } from './entry-points';
 
 const COMMENT_MARKER_REGEX = /\b(TODO|FIXME|HACK|TBD|placeholder)\b[:\s-]*(.*)$/i;
 const NOT_IMPLEMENTED_REGEX = /\b(not implemented|todo|stub|placeholder|pending)\b/i;
@@ -187,7 +188,7 @@ export async function analyzeUnfinishedWork(targetDir: string): Promise<Unfinish
   const files = await glob('**/*.{ts,js,tsx,jsx}', {
     cwd: targetDir,
     absolute: true,
-    ignore: ['**/node_modules/**', '**/dist/**', '**/build/**', '**/.git/**', '**/*.d.ts', '**/*.test.*', '**/*.spec.*'],
+    ignore: ANALYZER_IGNORE_GLOBS,
   });
 
   const findings: UnfinishedWorkFinding[] = [];
