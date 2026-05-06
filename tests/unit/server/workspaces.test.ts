@@ -1,8 +1,13 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { WorkspaceManager, buildGitHubCheckoutPlan, parseGitHubUrl } from '../../../packages/core/src/server/workspaces';
+import { execFile } from 'child_process';
+import { WorkspaceManager, buildGitHubCheckoutPlan, buildWorkspaceSourceLabel, parseGitHubUrl } from '../../../packages/core/src/server/workspaces';
+
+// Mock child_process at the module level so the mock is in place when workspaces.ts
+// calls promisify(execFile) during module initialisation.
+vi.mock('child_process', () => ({ execFile: vi.fn() }));
 
 const tempDirs: string[] = [];
 
@@ -179,5 +184,151 @@ describe('workspace helpers', () => {
     expect(ready.entryPoints.some((entryPoint) => entryPoint.type === 'http-route')).toBe(true);
     expect(ready.detectedScripts.some((script) => script.name === 'dev')).toBe(true);
     expect(ready.likelyJourneys.length).toBeGreaterThan(0);
+  });
+});
+
+describe('WorkspaceManager error handling', () => {
+  it('sets status to failed when a local path does not exist', async () => {
+    const manager = new WorkspaceManager();
+    const workspace = await manager.createWorkspace({
+      source: { type: 'local-path', path: '/nonexistent/rsd-test-path-xyz123' },
+    });
+    const result = await manager.waitForWorkspace(workspace.id);
+    expect(result.status).toBe('failed');
+    expect(result.errors[0]).toContain('/nonexistent/rsd-test-path-xyz123');
+    expect(result.errors[0]).toContain('Suggested action');
+  });
+
+  it('sets status to failed when the local path points to a deeply nonexistent directory', async () => {
+    const manager = new WorkspaceManager();
+    const workspace = await manager.createWorkspace({
+      source: { type: 'local-path', path: '/nonexistent/rsd-test-nested/path/xyz999' },
+    });
+    const result = await manager.waitForWorkspace(workspace.id);
+    expect(result.status).toBe('failed');
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it('resolves a relative path to an absolute path when the directory exists', async () => {
+    const projectDir = writeTempProject({
+      'src/actions.ts': `export function hello() { return 'world'; }`,
+    });
+
+    // Pass a path relative to the system temp dir so it resolves correctly from process.cwd().
+    // Since path.resolve() is called in resolveWorkspacePath, an absolute path passed in is fine.
+    const manager = new WorkspaceManager();
+    const workspace = await manager.createWorkspace({
+      source: { type: 'local-path', path: projectDir },
+    });
+    const result = await manager.waitForWorkspace(workspace.id);
+    expect(result.status).toBe('ready');
+    expect(path.isAbsolute(result.cachePath!)).toBe(true);
+  });
+});
+
+describe('WorkspaceManager GitHub source (mocked git)', () => {
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('completes with fresh-clone cache state when git clone succeeds', async () => {
+    // Compute the deterministic cache path that WorkspaceManager will use.
+    const cachePath = path.join(
+      os.homedir(),
+      '.runtime-storyboard-debugger',
+      'cache',
+      'testowner',
+      'testrepo',
+      'default',
+    );
+    tempDirs.push(cachePath);
+
+    // Pre-populate the cache dir with a minimal project so static analysis can run.
+    fs.mkdirSync(path.join(cachePath, 'src'), { recursive: true });
+    fs.writeFileSync(
+      path.join(cachePath, 'package.json'),
+      JSON.stringify({ name: 'mock-repo', scripts: { start: 'node index.js' } }),
+    );
+    fs.writeFileSync(
+      path.join(cachePath, 'src', 'actions.ts'),
+      `export function greet(name: string) { return 'Hello ' + name; }`,
+    );
+
+    // The mock execFile is already in place (hoisted vi.mock at top of file).
+    // Configure it to call the callback with success for this test.
+    vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+      const cb = args[args.length - 1] as (err: null, stdout: string, stderr: string) => void;
+      cb(null, '', '');
+      return {} as ReturnType<typeof execFile>;
+    });
+
+    const manager = new WorkspaceManager();
+    const workspace = await manager.createWorkspace({
+      source: { type: 'github-url', url: 'https://github.com/testowner/testrepo' },
+    });
+    const result = await manager.waitForWorkspace(workspace.id);
+
+    expect(result.status).toBe('ready');
+    expect(result.cacheState).toBe('fresh-clone');
+    expect(result.entryPoints.some((ep) => ep.type === 'exported-function')).toBe(true);
+  });
+
+  it('sets status to failed when git clone errors', async () => {
+    vi.mocked(execFile).mockImplementation((...args: unknown[]) => {
+      const cb = args[args.length - 1] as (err: Error) => void;
+      cb(new Error('git: command not found'));
+      return {} as ReturnType<typeof execFile>;
+    });
+
+    const manager = new WorkspaceManager();
+    const workspace = await manager.createWorkspace({
+      source: { type: 'github-url', url: 'https://github.com/testowner/failrepo' },
+    });
+    const result = await manager.waitForWorkspace(workspace.id);
+
+    expect(result.status).toBe('failed');
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+});
+
+describe('buildWorkspaceSourceLabel', () => {
+  it('returns the path for a local-path source', () => {
+    expect(
+      buildWorkspaceSourceLabel({ type: 'local-path', path: '/Users/me/my-project' }),
+    ).toBe('/Users/me/my-project');
+  });
+
+  it('returns owner/repo for a GitHub source without a ref', () => {
+    expect(
+      buildWorkspaceSourceLabel({ type: 'github-url', owner: 'openai', repo: 'codex' }),
+    ).toBe('openai/codex');
+  });
+
+  it('returns owner/repo@ref when a ref is provided', () => {
+    expect(
+      buildWorkspaceSourceLabel({ type: 'github-url', owner: 'openai', repo: 'codex', ref: 'main' }),
+    ).toBe('openai/codex@main');
+  });
+
+  it('appends the focus path in parentheses when provided', () => {
+    expect(
+      buildWorkspaceSourceLabel({
+        type: 'github-url',
+        owner: 'openai',
+        repo: 'codex',
+        ref: 'main',
+        focusPath: 'packages/core',
+      }),
+    ).toBe('openai/codex@main (focus: packages/core)');
+  });
+
+  it('falls back to the URL string when owner/repo are missing', () => {
+    expect(
+      buildWorkspaceSourceLabel({ type: 'github-url', url: 'https://github.com/openai/codex' }),
+    ).toBe('https://github.com/openai/codex');
+  });
+
+  it('returns a generic label when neither path, owner/repo, nor URL are present', () => {
+    expect(buildWorkspaceSourceLabel({ type: 'github-url' })).toBe('GitHub workspace');
   });
 });

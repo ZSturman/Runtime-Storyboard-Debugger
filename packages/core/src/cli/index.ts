@@ -31,7 +31,7 @@ program
 program
   .command('analyze')
   .description('Start the debug server and optionally preload a local workspace')
-  .argument('[target]', 'Optional path to the target application directory')
+  .argument('[target]', 'Absolute or relative path to the target application directory. Relative paths are resolved from the directory where npm was invoked (INIT_CWD).')
   .option('-p, --port <port>', 'Server port', '3001')
   .option('--ui <path>', 'Path to built UI directory')
   .action(async (target: string | undefined, opts: { port: string; ui?: string }) => {
@@ -41,6 +41,19 @@ program
 
       if (target) {
         targetDir = path.resolve(target);
+
+        // When invoked via `npm run -w <pkg>`, the process cwd is the package directory,
+        // but INIT_CWD is set to where npm was originally run (e.g., the workspace root).
+        // Fall back to INIT_CWD so that relative paths like `../../examples/order-api` still
+        // work even when the dev script omits the `../../` prefix.
+        if (!require('fs').existsSync(targetDir) && process.env.INIT_CWD) {
+          const fromInitCwd = path.resolve(process.env.INIT_CWD, target);
+          if (require('fs').existsSync(fromInitCwd)) {
+            console.log(`\nNote: "${target}" resolved relative to npm invocation directory.`);
+            targetDir = fromInitCwd;
+          }
+        }
+
         console.log(`\nAnalyzing: ${targetDir}\n`);
 
         const entryPoints = await discoverEntryPoints(targetDir);

@@ -426,6 +426,7 @@ export function subscribeToWorkspace(workspaceId: string, handlers: {
   const source = new EventSource(`${API_BASE}/workspaces/${encodeURIComponent(workspaceId)}/stream`);
   const forward = (event: Event) => {
     const message = event as MessageEvent<string>;
+    if (!message.data) return;
     handlers.onEvent(JSON.parse(message.data) as WorkspaceStreamEvent);
   };
 
@@ -470,6 +471,7 @@ export function subscribeToExecution(
   const source = new EventSource(`${API_BASE}/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}/stream`);
   const forward = (event: Event) => {
     const message = event as MessageEvent<string>;
+    if (!message.data) return;
     handlers.onEvent(JSON.parse(message.data) as ExecutionStreamEvent);
   };
 
@@ -515,4 +517,83 @@ export async function requestLlmAssist(workspaceId: string, prompt: string): Pro
     body: JSON.stringify({ prompt }),
   });
   return data.result;
+}
+
+// ── New file/tree/search/findings APIs ─────────────────────────────
+
+export interface FileTreeNode {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  size?: number;
+  children?: FileTreeNode[];
+}
+
+export interface FileContents {
+  path: string;
+  language: string;
+  contents: string;
+  size: number;
+  lineCount: number;
+  truncated: boolean;
+}
+
+export interface SearchHit {
+  path: string;
+  line: number;
+  column: number;
+  preview: string;
+}
+
+export async function fetchFileTree(workspaceId: string): Promise<FileTreeNode> {
+  const data = await requestJson<{ tree: FileTreeNode }>(
+    `${API_BASE}/workspaces/${encodeURIComponent(workspaceId)}/tree`,
+  );
+  return data.tree;
+}
+
+export async function fetchFile(workspaceId: string, filePath: string): Promise<FileContents> {
+  const params = new URLSearchParams({ path: filePath });
+  const data = await requestJson<{ file: FileContents }>(
+    `${API_BASE}/workspaces/${encodeURIComponent(workspaceId)}/file?${params.toString()}`,
+  );
+  return data.file;
+}
+
+export async function fetchReadme(workspaceId: string): Promise<FileContents | null> {
+  const data = await requestJson<{ file: FileContents | null }>(
+    `${API_BASE}/workspaces/${encodeURIComponent(workspaceId)}/readme`,
+  );
+  return data.file;
+}
+
+export async function fetchFindings(workspaceId: string): Promise<UnfinishedWorkFinding[]> {
+  const data = await requestJson<{ findings: UnfinishedWorkFinding[] }>(
+    `${API_BASE}/workspaces/${encodeURIComponent(workspaceId)}/findings`,
+  );
+  return data.findings;
+}
+
+export async function searchFiles(workspaceId: string, query: string): Promise<{ hits: SearchHit[]; truncated: boolean }> {
+  const params = new URLSearchParams({ q: query });
+  const data = await requestJson<{ hits: SearchHit[]; truncated: boolean }>(
+    `${API_BASE}/workspaces/${encodeURIComponent(workspaceId)}/search?${params.toString()}`,
+  );
+  return { hits: data.hits, truncated: !!data.truncated };
+}
+
+export async function fetchEntryPointsOnFile(workspaceId: string, filePath: string): Promise<EntryPoint[]> {
+  const params = new URLSearchParams({ path: filePath });
+  const data = await requestJson<{ entryPoints: EntryPoint[] }>(
+    `${API_BASE}/workspaces/${encodeURIComponent(workspaceId)}/entry-points-on-file?${params.toString()}`,
+  );
+  return data.entryPoints;
+}
+
+export async function fetchStoryboards(): Promise<{ storyboards: Array<{ id: string; entryPoint: { name: string; type: string }; totalFrames: number; scenarioName?: string; runContext?: unknown; unfinishedWorkCount?: number }> }> {
+  return requestJson(`${API_BASE}/storyboards`);
+}
+
+export async function fetchStoryboard(id: string): Promise<{ storyboard: Storyboard }> {
+  return requestJson(`${API_BASE}/storyboards/${encodeURIComponent(id)}`);
 }

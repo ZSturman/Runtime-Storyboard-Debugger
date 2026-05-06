@@ -37,7 +37,7 @@
     "build:core": "npm run build -w packages/core",
     "build:ui": "npm run build -w packages/ui",
     "dev": "concurrently -n core,ui -c blue,green \"npm run dev:core\" \"npm run dev:ui\"",
-    "dev:core": "npm run dev -w packages/core -- analyze examples/order-api",
+    "dev:core": "npm run dev -w packages/core -- analyze ../../examples/order-api",
     "dev:ui": "npm run dev -w packages/ui",
     "test": "vitest run",
     "test:watch": "vitest",

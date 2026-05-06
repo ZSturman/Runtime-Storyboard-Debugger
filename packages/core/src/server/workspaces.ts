@@ -658,7 +658,10 @@ export class WorkspaceManager {
     if (source.type === 'local-path') {
       const targetPath = path.resolve(source.path || '');
       if (!targetPath || !fs.existsSync(targetPath)) {
-        throw new Error(`Local path not found: ${source.path || '<missing>'}`);
+        throw new Error(
+          `[local_path_not_found] Local path not found: "${source.path || '<missing>'}". ` +
+            'Suggested action: use an absolute path (e.g., /Users/you/my-project) and verify the directory exists.',
+        );
       }
       return {
         cachePath: targetPath,

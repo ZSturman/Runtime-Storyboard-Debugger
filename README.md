@@ -2,52 +2,48 @@
 
 > **Status:** pre-1.0, public roadmap. See [docs/release-plan.md](docs/release-plan.md) and [docs/v1-scope.md](docs/v1-scope.md) for what's shipping and what's deferred.
 
-Understand an unfamiliar codebase by turning repo structure and runtime behavior into a visible, navigable storyboard.
+Open an unfamiliar codebase in an editor that already knows where the entry points are, where the unfinished work is, and how the code actually behaves at runtime.
 
-Runtime Storyboard Debugger helps two kinds of people quickly:
+RSD is shaped like a code editor on purpose. Drop in a local folder or a public GitHub URL and you get:
 
-- Developers who need to debug or extend a repo they have never seen before
-- Stakeholders who want a readable walkthrough of what an app is doing
+- a familiar **Activity Bar / Sidebar / Editor / Inspector / Bottom Panel** layout
+- a **file tree** that shows TODO/FIXME counts and which files contain entry points
+- the project **README** opened in the editor on first load
+- detected **entry points** with auto-generated input forms — one click runs them
+- a **storyboard** of the run that decorates the source: gutter glyphs, active line highlights, frame-by-frame variables and side effects in the Inspector
+- ⌘K **command palette** for jumping to any file, entry point, or finding
 
-Instead of hiding behind a loading spinner, RSD shows the pipeline in public:
-
-- repo ingestion
-- dependency discovery
-- static analysis
-- runtime instrumentation
-- execution
-- fallback analysis
-
-Then, when you trace a route or exported function, RSD shows the current step, current function or route, branch reasons, variable snapshots, side effects, waits, logs, returns, and failures as the run unfolds.
+Runtime tracing is one tab, not the whole app. RSD is fully usable as a static explorer; the runtime storyboard is what you reach for when you want to know what actually happened, not just what could.
 
 ## Why This Exists
 
-Most code understanding tools force a tradeoff:
+Most code-understanding tools force a tradeoff:
 
 - static graphs show what could happen, but not what actually happened
 - debuggers show what happened, but not in a repo-first, onboarding-friendly way
-- LLM explanations can be helpful, but they often hide uncertainty or skip over the underlying evidence
+- LLM explanations can be helpful, but they often hide uncertainty or skip the underlying evidence
 
-RSD is built to make the evidence visible first and the interpretation optional.
+RSD makes the evidence visible first and the interpretation optional.
 
 ## What It Does
 
-- Open a local path or a public GitHub repository URL
-- Detect routes, exported functions, startup files, package scripts, and likely user journeys automatically
-- Build flow graphs and unfinished-work findings before any runtime execution starts
-- Stream execution into a live timeline instead of waiting for one final result
-- Let you scrub backward and forward through already-captured steps
-- Fall back to the best available static analysis when runtime tracing stalls or fails
-- Offer optional LLM assistance for path discovery, explanations, uncertainty callouts, and alternate traces
+- Open a local path or a public GitHub repository URL.
+- Browse files in a Monaco-based editor with TODO/FIXME and entry-point decorations rendered inline.
+- Search the workspace with case-insensitive grep across allowlisted extensions.
+- List unfinished-work findings (TODO/FIXME/HACK/stub/analysis-gap) grouped by kind.
+- Run any detected entry point and watch frames stream into the Storyboard timeline.
+- Click a runtime frame (in the editor gutter or the timeline) to see its captured variables and side effects in the Inspector.
+- Fall back to deterministic static analysis when runtime tracing stalls or fails.
+- Offer optional LLM assistance — additive, labeled, never replacing the deterministic baseline.
 
 ## How It Works
 
 1. Create a workspace from a local directory or GitHub URL.
-2. RSD ingests the repo and surfaces progress while it is happening.
-3. Static analysis discovers entry points, routes, startup paths, scripts, blockers, and likely journeys.
-4. You choose a route or exported function and provide inputs.
-5. RSD streams execution events into a live storyboard.
-6. If runtime tracing cannot complete, RSD keeps the experience useful by explaining the blocker and showing fallback analysis.
+2. RSD ingests the repo, runs static analysis, and surfaces phase progress in the title bar.
+3. The file tree, README, entry points and findings populate the editor as soon as the workspace is ready.
+4. You pick an entry point, fill the auto-generated input form in the Inspector, and hit **▶ Run**.
+5. RSD streams execution events into the storyboard tab and decorates the open source files as frames arrive.
+6. If runtime tracing cannot complete, RSD shows the blocker and the best available fallback analysis without taking over the editor.
 
 ## Quick Start
 
@@ -78,6 +74,20 @@ Terminal 2 — UI:
 cd packages/ui
 RSD_API_URL=http://localhost:3001 npx vite
 ```
+
+> **Path format**: the `analyze` argument must be an **absolute path** (e.g., `/Users/you/my-project`).
+> Relative paths are resolved from the directory where npm was originally invoked, not from `packages/core`.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Local path not found: …` on startup | The path passed to `analyze` doesn't exist or is relative and resolved from the wrong directory | Use an absolute path: `analyze /abs/path/to/project` |
+| `git: command not found` during GitHub ingestion | `git` is not on your PATH | Install git and re-run |
+| GitHub workspace fails with permission error | Private repository — not supported yet | Clone the repo locally and use a local-path workspace |
+| `No entry points detected` after analysis | Target is not a Node.js/Express app, or source files are in an unexpected location | Ensure the project has a `src/` folder with exported functions or Express route handlers |
+| Port already in use | Another process is listening on port 3001 | Pass `--port <other>` to the `analyze` command |
+| UI connects but shows a stale workspace | A previous `npm run dev` left the server running | Kill the old process and restart |
 
 ## Recommended Demo Targets
 
